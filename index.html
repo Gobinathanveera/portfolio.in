@@ -187,6 +187,7 @@ tbody td.name{font-family:'Inter',sans-serif;font-weight:500;}
 .view[data-theme="ppf"]{--accent:var(--amber);}
 .view[data-theme="epf"]{--accent:var(--amber);}
 .view[data-theme="post"]{--accent:var(--brick);}
+.view[data-theme="entry"]{--accent:var(--blue);}
 
 @media(max-width:640px){
   .sidebar{position:fixed;left:0;top:0;bottom:0;}
@@ -249,6 +250,7 @@ const PAGES = [
   {id:'ppf',       label:'PPF', theme:'ppf', bg:'https://images.unsplash.com/photo-1601597111158-2fceff292cdc?q=80&w=1600&auto=format&fit=crop', icon:'shield'},
   {id:'epf',       label:'EPF', theme:'epf', bg:'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=1600&auto=format&fit=crop', icon:'briefcase'},
   {id:'post',      label:'Post Office Schemes', theme:'post', bg:'https://images.unsplash.com/photo-1579208030886-b937da0925dc?q=80&w=1600&auto=format&fit=crop', icon:'mail'},
+  {id:'entry',     label:'Add Entry', theme:'entry', bg:'https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1600&auto=format&fit=crop', icon:'plus'},
 ];
 
 const ICONS = {
@@ -259,6 +261,7 @@ const ICONS = {
   shield:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 5-3 7.5-7 9-4-1.5-7-4-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   briefcase:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.8"/></svg>',
   mail:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  plus:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 };
 
 /* ---------------- cloud sync (Firebase) ---------------- */
@@ -500,7 +503,7 @@ let currentView = 'dashboard';
 
 function buildSidebar(){
   sbNav.innerHTML = PAGES.map(p=>`
-    <div class="sb-item ${p.id===currentView?'active':''}" data-nav="${p.id}" style="--accent:var(--${p.theme==='dashboard'?'mint':(p.theme==='instocks'?'mint':p.theme==='usstocks'?'blue':p.theme==='mf'?'gold':p.theme==='post'?'brick':'amber')})">
+    <div class="sb-item ${p.id===currentView?'active':''}" data-nav="${p.id}" style="--accent:var(--${p.theme==='dashboard'?'mint':(p.theme==='instocks'?'mint':p.theme==='usstocks'?'blue':p.theme==='mf'?'gold':p.theme==='post'?'brick':p.theme==='entry'?'blue':'amber')})">
       <span class="ic">${ICONS[p.icon]}</span><span>${p.label}</span><span class="dot"></span>
     </div>`).join('');
   sbNav.querySelectorAll('.sb-item').forEach(el=>{
@@ -1163,6 +1166,154 @@ function renderPost(){
   });
 }
 
+/* ================= UNIFIED DATA ENTRY (last tab) ================= */
+const ENTRY_CATEGORIES = [
+  {id:'instocks', label:'Indian Stock / ETF'},
+  {id:'usstocks', label:'US Stock / ETF'},
+  {id:'mf',       label:'Mutual Fund'},
+  {id:'ppf',      label:'PPF'},
+  {id:'epf',      label:'EPF'},
+  {id:'post',     label:'Post Office Scheme'},
+];
+
+function entryFieldsHtml(cat){
+  const today = todayStr();
+  if(cat==='instocks' || cat==='usstocks'){
+    return `
+      <div class="form-row">
+        <div class="field"><label>Symbol ${cat==='usstocks'?'(e.g. AAPL)':'(NSE, e.g. TCS)'}</label><input required name="symbol" placeholder="${cat==='usstocks'?'AAPL':'TCS'}"></div>
+        <div class="field"><label>Quantity</label><input required name="qty" type="number" step="any" min="0"></div>
+        <div class="field"><label>Buy Price</label><input required name="buyPrice" type="number" step="any" min="0"></div>
+        <div class="field"><label>Buy Date</label><input required name="buyDate" type="date" value="${today}"></div>
+      </div>`;
+  }
+  if(cat==='mf'){
+    return `
+      <div class="form-row">
+        <div class="field"><label>Fund Name</label><input required name="fundName" placeholder="e.g. Parag Parikh Flexi Cap"></div>
+        <div class="field"><label>AMFI Scheme Code</label><input required name="schemeCode" placeholder="e.g. 122639"></div>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
+        <div class="field"><label>Amount Invested</label><input required name="amount" type="number" step="any" min="0"></div>
+      </div>`;
+  }
+  if(cat==='ppf' || cat==='epf'){
+    return `
+      <div class="form-row">
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
+        <div class="field"><label>Amount Deposited</label><input required name="amount" type="number" step="any" min="0"></div>
+        <div class="field"><label>Interest Credited (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
+      </div>`;
+  }
+  if(cat==='post'){
+    const existing = DB.post.map(s=>s.schemeName);
+    return `
+      <div class="form-row">
+        <div class="field"><label>Scheme Name</label><input required name="schemeName" list="postSchemeList" placeholder="e.g. NSC, SCSS, Time Deposit"></div>
+        <datalist id="postSchemeList">${existing.map(n=>`<option value="${n}">`).join('')}</datalist>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
+        <div class="field"><label>Amount</label><input required name="amount" type="number" step="any" min="0"></div>
+        <div class="field"><label>Interest (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Maturity Date (only used if this is a new scheme)</label><input name="maturityDate" type="date"></div>
+        <div class="field"><label>Interest Rate % p.a. (only used if new)</label><input name="rate" type="number" step="any" min="0"></div>
+      </div>`;
+  }
+  return '';
+}
+
+function renderEntryPage(){
+  const page = PAGES.find(p=>p.id==='entry');
+  const cat = window._entryCat || 'instocks';
+  const html = `
+    <div class="page-head">
+      <div>
+        <div class="page-eyebrow">Quick Add</div>
+        <div class="page-title">${page.label}</div>
+        <div class="page-sub">Pick a category, log an entry, and keep going — no need to switch tabs.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="form-row">
+        <div class="field" style="max-width:280px;">
+          <label>Category</label>
+          <select id="entryCategory">
+            ${ENTRY_CATEGORIES.map(c=>`<option value="${c.id}" ${c.id===cat?'selected':''}>${c.label}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <form id="quickEntryForm">
+        <div id="entryFieldsWrap">${entryFieldsHtml(cat)}</div>
+        <button class="btn" type="submit">Add Entry</button>
+      </form>
+      <div id="entryFeedback" style="display:none;margin-top:12px;padding:10px 12px;border-radius:9px;background:#34D39922;color:var(--green);font-size:12.5px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Added this session</h3></div>
+      <div id="entryLog">${(window._entryLog||[]).length===0?'<div class="empty-state" style="padding:20px;"><b>Nothing yet</b>Entries you add here will list below as you go.</div>':
+        `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Time</th></tr></thead><tbody>
+          ${window._entryLog.slice().reverse().map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.time}</td></tr>`).join('')}
+        </tbody></table></div>`}
+    </div>
+  `;
+  mainEl.innerHTML = pageShell(page, html);
+
+  document.getElementById('entryCategory').addEventListener('change', e=>{
+    window._entryCat = e.target.value;
+    document.getElementById('entryFieldsWrap').innerHTML = entryFieldsHtml(window._entryCat);
+  });
+
+  document.getElementById('quickEntryForm').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const cat = document.getElementById('entryCategory').value;
+    const f = new FormData(e.target);
+    let detail = '';
+
+    if(cat==='instocks' || cat==='usstocks'){
+      const symbol = f.get('symbol').toUpperCase(), qty = +f.get('qty'), buyPrice = +f.get('buyPrice'), buyDate = f.get('buyDate');
+      DB[cat].push({ id:uid(), symbol, qty, buyPrice, buyDate, lastPrice:null, priceLive:null });
+      detail = `${symbol} · ${qty} @ ${fmtINR(buyPrice)}`;
+      saveDB();
+    } else if(cat==='mf'){
+      const schemeCode = f.get('schemeCode').trim(), fundName = f.get('fundName'), date = f.get('date'), amount = +f.get('amount');
+      let fund = DB.mf.find(x=>x.schemeCode===schemeCode);
+      if(!fund){ fund = {id:uid(), fundName, schemeCode, entries:[], lastNav:null, navLive:null}; DB.mf.push(fund); }
+      const navRes = await fetchMFNav(schemeCode);
+      const nav = navRes.nav || fund.lastNav || 100;
+      fund.lastNav = navRes.nav || fund.lastNav;
+      fund.navLive = navRes.live;
+      fund.entries.push({ id:uid(), date, amount, navAtEntry:nav, units: nav? amount/nav : 0 });
+      detail = `${fundName} · ${fmtINR(amount)} on ${date}`;
+      saveDB();
+    } else if(cat==='ppf' || cat==='epf'){
+      const date = f.get('date'), amount = +f.get('amount'), interest = +f.get('interest')||0;
+      DB[cat].push({id:uid(), date, amount, interest});
+      detail = `${fmtINR(amount)}${interest?' + '+fmtINR(interest)+' interest':''} on ${date}`;
+      saveDB();
+    } else if(cat==='post'){
+      const schemeName = f.get('schemeName').trim(), date = f.get('date'), amount = +f.get('amount'), interest = +f.get('interest')||0;
+      let scheme = DB.post.find(s=>s.schemeName.toLowerCase()===schemeName.toLowerCase());
+      if(!scheme){
+        scheme = { id:uid(), schemeName, maturityDate: f.get('maturityDate')||null, rate: +f.get('rate')||null, entries:[] };
+        DB.post.push(scheme);
+      }
+      scheme.entries.push({ id:uid(), date, amount, interest });
+      detail = `${schemeName} · ${fmtINR(amount)} on ${date}`;
+      saveDB();
+    }
+
+    window._entryLog = window._entryLog || [];
+    window._entryLog.push({ cat: ENTRY_CATEGORIES.find(c=>c.id===cat).label, detail, time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) });
+    window._entryCat = cat;
+
+    renderAll();
+    const fb = document.getElementById('entryFeedback');
+    if(fb){ fb.style.display='block'; fb.textContent = `Added: ${detail}`; }
+  });
+}
+
 /* ================= ROUTER ================= */
 function renderAll(){
   buildSidebar();
@@ -1173,6 +1324,7 @@ function renderAll(){
   else if(currentView==='ppf') renderSimpleLedger(4,'ppf','PPF','Public Provident Fund');
   else if(currentView==='epf') renderSimpleLedger(5,'epf','EPF','Employees\' Provident Fund');
   else if(currentView==='post') renderPost();
+  else if(currentView==='entry') renderEntryPage();
 }
 renderAll();
 </script>
