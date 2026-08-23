@@ -543,6 +543,50 @@ async function fetchMFNavOnDate(schemeCode, dateStr){
 }
 
 
+/* ---------------- USD → INR historical conversion ---------------- */
+const DEFAULT_USD_INR = 83; // fallback only, used until a real rate is fetched for that date
+const sessionTriedFx = new Set(); // dates attempted this session — avoids retry loops if the FX API is down
+function getCachedFxRate(dateStr){
+  const c = DB.priceCache['fx_'+dateStr];
+  return c ? c.price : null;
+}
+async function fetchFxRate(dateStr){
+  const cached = getCachedFxRate(dateStr);
+  if(cached) return {rate:cached, live:true};
+  try{
+    const res = await fetch(`https://api.exchangerate.host/${dateStr}?base=USD&symbols=INR`, {cache:'no-store'});
+    if(!res.ok) throw new Error('bad');
+    const j = await res.json();
+    const rate = j?.rates?.INR;
+    if(typeof rate !== 'number') throw new Error('no rate');
+    DB.priceCache['fx_'+dateStr] = {price:rate, ts:Date.now()};
+    saveDB();
+    return {rate, live:true};
+  }catch(e){
+    return {rate:null, live:false};
+  }
+}
+
+/* ---------------- confirm dialog (themed, replaces browser confirm()) ---------------- */
+function confirmModal(message){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:300;background:#00000099;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="background:#121826;border:1px solid #ffffff1c;border-radius:14px;padding:22px;max-width:340px;width:100%;">
+        <p style="color:#EAF0FA;font-size:13.5px;line-height:1.5;margin-bottom:18px;">${message}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn ghost tiny" id="confirmNoBtn" type="button">No</button>
+          <button class="btn danger tiny" id="confirmYesBtn" type="button">Yes, remove it</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#confirmNoBtn').addEventListener('click', ()=>{ overlay.remove(); resolve(false); });
+    overlay.querySelector('#confirmYesBtn').addEventListener('click', ()=>{ overlay.remove(); resolve(true); });
+    overlay.addEventListener('click', e=>{ if(e.target===overlay){ overlay.remove(); resolve(false); } });
+  });
+}
+
 /* ================= RENDER SHELL ================= */
 const sbNav = document.getElementById('sbNav');
 const mainEl = document.getElementById('main');
@@ -573,8 +617,32 @@ function pageShell(page, innerHtml, ticker){
 }
 
 /* ================= DASHBOARD ================= */
+function usdInvestedInInr(h){
+  return (h.lots||[]).reduce((s,l)=>{
+    const rate = getCachedFxRate(l.buyDate) || DEFAULT_USD_INR;
+    return s + l.qty*l.buyPrice*rate;
+  },0);
+}
+function usdCurrentInInr(h){
+  const rate = getCachedFxRate(todayStr()) || DEFAULT_USD_INR;
+  return holdingQty(h)*(h.lastPrice||holdingAvgPrice(h))*rate;
+}
+async function ensureFxRatesLoaded(){
+  const dates = new Set([todayStr()]);
+  DB.usstocks.forEach(h=>(h.lots||[]).forEach(l=>dates.add(l.buyDate)));
+  let changed=false;
+  for(const d of dates){
+    if(getCachedFxRate(d) || sessionTriedFx.has(d)) continue;
+    sessionTriedFx.add(d);
+    const r = await fetchFxRate(d);
+    if(r.rate) changed=true;
+  }
+  if(changed) renderAll();
+}
 function allHoldingsFlat(){
-  // returns {invested, current, xirrFlows[], byType:{}}
+  // returns {invested, current, xirrFlows[], byType:{}} — all figures in INR.
+  // US stock amounts are converted using the FX rate on each transaction's own date (for "invested")
+  // and today's rate (for "current"), falling back to an approximate default until real rates load.
   const flows = [];
   let invested=0, current=0;
   const byType = {};
@@ -587,10 +655,13 @@ function allHoldingsFlat(){
     (h.lots||[]).forEach(l=> flows.push({date:l.buyDate, amount:-(l.qty*l.buyPrice)}));
   });
   DB.usstocks.forEach(h=>{
-    const inv = holdingInvested(h);
-    const cur = holdingCurrent(h);
+    const inv = usdInvestedInInr(h);
+    const cur = usdCurrentInInr(h);
     add('US Stocks & ETFs', inv, cur);
-    (h.lots||[]).forEach(l=> flows.push({date:l.buyDate, amount:-(l.qty*l.buyPrice)}));
+    (h.lots||[]).forEach(l=>{
+      const rate = getCachedFxRate(l.buyDate) || DEFAULT_USD_INR;
+      flows.push({date:l.buyDate, amount:-(l.qty*l.buyPrice*rate)});
+    });
   });
   DB.mf.forEach(f=>{
     let units=0, inv=0;
@@ -619,7 +690,10 @@ function monthLabel(k){ const [y,m]=k.split('-'); return new Date(y,m-1,1).toLoc
 function investedByMonth(){
   const flows = [];
   DB.instocks.forEach(h=>(h.lots||[]).forEach(l=>flows.push({date:l.buyDate, amount:l.qty*l.buyPrice})));
-  DB.usstocks.forEach(h=>(h.lots||[]).forEach(l=>flows.push({date:l.buyDate, amount:l.qty*l.buyPrice})));
+  DB.usstocks.forEach(h=>(h.lots||[]).forEach(l=>{
+    const rate = getCachedFxRate(l.buyDate) || DEFAULT_USD_INR;
+    flows.push({date:l.buyDate, amount:l.qty*l.buyPrice*rate});
+  }));
   DB.mf.forEach(f=>f.entries.forEach(e=>flows.push({date:e.date, amount:e.amount})));
   DB.ppf.forEach(e=>flows.push({date:e.date, amount:e.amount}));
   DB.epf.forEach(e=>flows.push({date:e.date, amount:e.amount}));
@@ -760,6 +834,7 @@ function renderDashboard(){
     data:{ labels: proj.points.map(p=>p.label), datasets:[{ label:'Projected Value', data: proj.points.map(p=>p.value), backgroundColor:['#8B96AC','#3ED9A0','#4C8DFF','#D6A93C'], borderRadius:8 }]},
     options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false}, ticks:{color:'#8B96AC'}}, y:{grid:{color:'#ffffff0a'}, ticks:{color:'#8B96AC', callback:v=>fmtINR(v)}} } }
   });
+  if(DB.usstocks.length>0) ensureFxRatesLoaded();
 }
 
 function chartOpts(showLegend){
@@ -778,13 +853,16 @@ function renderStocksPage(pageIdx, key, currency){
   const totalInv = rows.reduce((s,h)=>s+holdingInvested(h),0);
   const totalCur = rows.reduce((s,h)=>s+holdingCurrent(h),0);
   const gain = totalCur-totalInv;
+  const isUSD = currency==='USD';
+  const totalInvInr = isUSD ? rows.reduce((s,h)=>s+usdInvestedInInr(h),0) : null;
+  const totalCurInr = isUSD ? rows.reduce((s,h)=>s+usdCurrentInInr(h),0) : null;
 
   const html = `
     <div class="page-head">
       <div>
         <div class="page-eyebrow">${currency==='USD'?'US Markets':'Indian Markets'}</div>
         <div class="page-title">${page.label}</div>
-        <div class="page-sub">Live prices via public market data, cached when offline. Use the "Add Entry" tab to log new buys — adding the same symbol again averages your buy price automatically.</div>
+        <div class="page-sub">Live prices via public market data, cached when offline. Use the "Add Entry" tab to log new buys — adding the same symbol again averages your buy price automatically.${isUSD?' ₹ values use the actual USD/INR rate on each transaction\'s date.':''}</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${excelBtnsHtml('stocks')}
@@ -793,8 +871,8 @@ function renderStocksPage(pageIdx, key, currency){
     </div>
 
     <div class="stat-grid">
-      <div class="card"><div class="stat-label">Invested</div><div class="stat-value">${fmt(totalInv)}</div></div>
-      <div class="card"><div class="stat-label">Current Value</div><div class="stat-value">${fmt(totalCur)}</div></div>
+      <div class="card"><div class="stat-label">Invested</div><div class="stat-value">${fmt(totalInv)}</div>${isUSD?`<div class="stat-delta">≈ ${fmtINR(totalInvInr)}</div>`:''}</div>
+      <div class="card"><div class="stat-label">Current Value</div><div class="stat-value">${fmt(totalCur)}</div>${isUSD?`<div class="stat-delta">≈ ${fmtINR(totalCurInr)}</div>`:''}</div>
       <div class="card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'up':'down'}">${fmt(gain)}</div><div class="stat-delta ${gain>=0?'up':'down'}">${fmtPct(totalInv>0?gain/totalInv*100:0)}</div></div>
     </div>
 
@@ -803,16 +881,17 @@ function renderStocksPage(pageIdx, key, currency){
       <div class="table-scroll">
       ${rows.length===0?`<div class="empty-state"><b>No holdings yet</b>Use the "Add Entry" tab to log your first ${currency==='USD'?'US':'Indian'} stock or ETF.</div>`:`
       <table>
-        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy Price</th><th>Live Price</th><th>Invested</th><th>Current</th><th>Gain/Loss</th><th></th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy Price</th><th>Live Price</th><th>Invested</th>${isUSD?'<th>₹ Invested (at txn date)</th>':''}<th>Current</th><th>Gain/Loss</th><th></th></tr></thead>
         <tbody>
           ${rows.map(h=>{
             const qty=holdingQty(h), avgPrice=holdingAvgPrice(h), inv=holdingInvested(h), cur=holdingCurrent(h), g=cur-inv, gp=inv>0?g/inv*100:0;
             const lotCount = (h.lots||[]).length;
             const lotTitle = (h.lots||[]).map(l=>`${l.qty} @ ${fmt(l.buyPrice)} on ${l.buyDate}`).join(' | ');
+            const invInr = isUSD ? usdInvestedInInr(h) : null;
             return `<tr>
               <td class="name" title="${lotTitle}">${h.symbol} ${lotCount>1?`<span class="tag">×${lotCount} lots</span>`:''} ${h.priceLive===false?'<span class="badge cached">cached</span>':h.lastPrice?'<span class="badge live">live</span>':''}</td>
               <td>${qty.toFixed(2)}</td><td>${fmt(avgPrice)}</td><td>${h.lastPrice?fmt(h.lastPrice):'—'}</td>
-              <td>${fmt(inv)}</td><td>${fmt(cur)}</td>
+              <td>${fmt(inv)}</td>${isUSD?`<td>${fmtINR(invInr)}</td>`:''}<td>${fmt(cur)}</td>
               <td class="${g>=0?'up':'down'}">${fmt(g)} (${fmtPct(gp)})</td>
               <td><button class="btn tiny danger" data-del="${h.id}">Remove</button></td>
             </tr>`;
@@ -855,6 +934,7 @@ function renderStocksPage(pageIdx, key, currency){
   // auto-fetch once per holding per session — never retries in a loop if a fetch fails
   const needsFetch = rows.some(h=>!h.lastPrice && !sessionTriedPrices.has(h.id));
   if(needsFetch) refreshStockPrices(key, currency, false);
+  if(isUSD && rows.length>0) ensureFxRatesLoaded();
 }
 
 const sessionTriedPrices = new Set(); // holding ids attempted this session (cleared only by manual refresh)
@@ -1128,47 +1208,52 @@ const ENTRY_CATEGORIES = [
   {id:'post',     label:'Post Office Scheme'},
 ];
 
-function entryFieldsHtml(cat){
+function entryFieldsHtml(cat, prefill){
   const today = todayStr();
+  const p = prefill || {};
   if(cat==='instocks' || cat==='usstocks'){
+    const existingSymbols = [...new Set(DB[cat].map(h=>h.symbol))];
     return `
       <div class="form-row">
-        <div class="field"><label>Symbol ${cat==='usstocks'?'(e.g. AAPL)':'(NSE, e.g. TCS)'}</label><input required name="symbol" placeholder="${cat==='usstocks'?'AAPL':'TCS'}"></div>
-        <div class="field"><label>Quantity</label><input required name="qty" type="number" step="any" min="0"></div>
-        <div class="field"><label>Buy Price</label><input required name="buyPrice" type="number" step="any" min="0"></div>
-        <div class="field"><label>Buy Date</label><input required name="buyDate" type="date" value="${today}"></div>
+        <div class="field"><label>Symbol ${cat==='usstocks'?'(e.g. AAPL)':'(NSE, e.g. TCS)'}</label><input required id="entrySymbol" name="symbol" list="symbolList" placeholder="${cat==='usstocks'?'AAPL':'TCS'}" value="${p.symbol||''}"></div>
+        <datalist id="symbolList">${existingSymbols.map(s=>`<option value="${s}">`).join('')}</datalist>
+        <div class="field"><label>Quantity</label><input required name="qty" type="number" step="any" min="0" value="${p.qty??''}"></div>
+        <div class="field"><label>Buy Price</label><input required name="buyPrice" type="number" step="any" min="0" value="${p.buyPrice??''}"></div>
+        <div class="field"><label>Buy Date</label><input required name="buyDate" type="date" value="${p.buyDate||today}"></div>
       </div>`;
   }
   if(cat==='mf'){
+    const existingFunds = [...new Map(DB.mf.map(f=>[f.fundName, f.schemeCode])).entries()];
     return `
       <div class="form-row">
-        <div class="field"><label>Fund Name</label><input required name="fundName" placeholder="e.g. Parag Parikh Flexi Cap"></div>
-        <div class="field"><label>AMFI Scheme Code</label><input required name="schemeCode" placeholder="e.g. 122639"></div>
-        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
-        <div class="field"><label>Amount Invested</label><input required name="amount" type="number" step="any" min="0"></div>
+        <div class="field"><label>Fund Name</label><input required id="entryFundName" name="fundName" list="fundNameList" placeholder="e.g. Parag Parikh Flexi Cap" value="${p.fundName||''}"></div>
+        <datalist id="fundNameList">${existingFunds.map(([n])=>`<option value="${n}">`).join('')}</datalist>
+        <div class="field"><label>AMFI Scheme Code</label><input required id="entrySchemeCode" name="schemeCode" placeholder="e.g. 122639" value="${p.schemeCode||''}"></div>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${p.date||today}"></div>
+        <div class="field"><label>Amount Invested</label><input required name="amount" type="number" step="any" min="0" value="${p.amount??''}"></div>
       </div>`;
   }
   if(cat==='ppf' || cat==='epf'){
     return `
       <div class="form-row">
-        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
-        <div class="field"><label>Amount Deposited</label><input required name="amount" type="number" step="any" min="0"></div>
-        <div class="field"><label>Interest Credited (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${p.date||today}"></div>
+        <div class="field"><label>Amount Deposited</label><input required name="amount" type="number" step="any" min="0" value="${p.amount??''}"></div>
+        <div class="field"><label>Interest Credited (optional)</label><input name="interest" type="number" step="any" min="0" value="${p.interest??0}"></div>
       </div>`;
   }
   if(cat==='post'){
     const existing = DB.post.map(s=>s.schemeName);
     return `
       <div class="form-row">
-        <div class="field"><label>Scheme Name</label><input required name="schemeName" list="postSchemeList" placeholder="e.g. NSC, SCSS, Time Deposit"></div>
+        <div class="field"><label>Scheme Name</label><input required name="schemeName" list="postSchemeList" placeholder="e.g. NSC, SCSS, Time Deposit" value="${p.schemeName||''}"></div>
         <datalist id="postSchemeList">${existing.map(n=>`<option value="${n}">`).join('')}</datalist>
-        <div class="field"><label>Date</label><input required name="date" type="date" value="${today}"></div>
-        <div class="field"><label>Amount</label><input required name="amount" type="number" step="any" min="0"></div>
-        <div class="field"><label>Interest (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${p.date||today}"></div>
+        <div class="field"><label>Amount</label><input required name="amount" type="number" step="any" min="0" value="${p.amount??''}"></div>
+        <div class="field"><label>Interest (optional)</label><input name="interest" type="number" step="any" min="0" value="${p.interest??0}"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Maturity Date (only used if this is a new scheme)</label><input name="maturityDate" type="date"></div>
-        <div class="field"><label>Interest Rate % p.a. (only used if new)</label><input name="rate" type="number" step="any" min="0"></div>
+        <div class="field"><label>Maturity Date (only used if this is a new scheme)</label><input name="maturityDate" type="date" value="${p.maturityDate||''}"></div>
+        <div class="field"><label>Interest Rate % p.a. (only used if new)</label><input name="rate" type="number" step="any" min="0" value="${p.rate??''}"></div>
       </div>`;
   }
   return '';
@@ -1178,6 +1263,8 @@ function renderEntryPage(){
   const page = PAGES.find(p=>p.id==='entry');
   const cat = window._entryCat || 'instocks';
   const allEntries = allEntriesFlat();
+  const editingRef = window._editingRef || null;
+  const editData = editingRef ? getEntryDataByRef(editingRef) : null;
   const html = `
     <div class="page-head">
       <div>
@@ -1196,9 +1283,13 @@ function renderEntryPage(){
           </select>
         </div>
       </div>
+      ${editingRef?`<div class="rate-note" style="color:var(--amber);margin-bottom:10px;">Editing an existing entry — saving will update it in place.</div>`:''}
       <form id="quickEntryForm">
-        <div id="entryFieldsWrap">${entryFieldsHtml(cat)}</div>
-        <button class="btn" type="submit">Add Entry</button>
+        <div id="entryFieldsWrap">${entryFieldsHtml(cat, editData?editData.prefill:null)}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" type="submit">${editingRef?'Save Changes':'Add Entry'}</button>
+          ${editingRef?`<button class="btn ghost" type="button" id="cancelEditBtn">Cancel</button>`:''}
+        </div>
       </form>
       <div id="entryFeedback" style="display:none;margin-top:12px;padding:10px 12px;border-radius:9px;background:#34D39922;color:var(--green);font-size:12.5px;"></div>
     </div>
@@ -1207,7 +1298,7 @@ function renderEntryPage(){
       <div class="panel-head"><h3>All Entries (${allEntries.length})</h3></div>
       ${allEntries.length===0?'<div class="empty-state"><b>Nothing yet</b>Entries you add — across every category — will list here, newest first.</div>':
         `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Date</th><th></th></tr></thead><tbody>
-          ${allEntries.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date}</td><td><button class="btn tiny danger" data-delany="${e.ref}">Remove</button></td></tr>`).join('')}
+          ${allEntries.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date}</td><td><button class="btn tiny ghost" data-editref="${e.ref}">Edit</button> <button class="btn tiny danger" data-delany="${e.ref}">Remove</button></td></tr>`).join('')}
         </tbody></table></div>`}
     </div>
   `;
@@ -1215,14 +1306,33 @@ function renderEntryPage(){
 
   document.getElementById('entryCategory').addEventListener('change', e=>{
     window._entryCat = e.target.value;
-    document.getElementById('entryFieldsWrap').innerHTML = entryFieldsHtml(window._entryCat);
+    document.getElementById('entryFieldsWrap').innerHTML = entryFieldsHtml(window._entryCat, null);
+    wireMfAutofill();
   });
+  wireMfAutofill();
+  function wireMfAutofill(){
+    const fundNameInput = document.getElementById('entryFundName');
+    const schemeCodeInput = document.getElementById('entrySchemeCode');
+    if(fundNameInput && schemeCodeInput){
+      fundNameInput.addEventListener('input', ()=>{
+        const match = DB.mf.find(f=>f.fundName.toLowerCase()===fundNameInput.value.trim().toLowerCase());
+        if(match) schemeCodeInput.value = match.schemeCode;
+      });
+    }
+  }
+
+  if(editingRef){
+    const cancelBtn = document.getElementById('cancelEditBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ window._editingRef=null; renderAll(); });
+  }
 
   document.getElementById('quickEntryForm').addEventListener('submit', async e=>{
     e.preventDefault();
     const cat = document.getElementById('entryCategory').value;
     const f = new FormData(e.target);
     let detail = '';
+    const wasEditing = !!window._editingRef;
+    if(wasEditing){ deleteByRef(window._editingRef); }
 
     if(cat==='instocks' || cat==='usstocks'){
       const symbol = f.get('symbol').toUpperCase(), qty = +f.get('qty'), buyPrice = +f.get('buyPrice'), buyDate = f.get('buyDate');
@@ -1233,10 +1343,9 @@ function renderEntryPage(){
       const schemeCode = f.get('schemeCode').trim(), fundName = f.get('fundName'), date = f.get('date'), amount = +f.get('amount');
       let fund = DB.mf.find(x=>x.schemeCode===schemeCode);
       if(!fund){ fund = {id:uid(), fundName, schemeCode, entries:[], lastNav:null, navLive:null}; DB.mf.push(fund); }
-      const navRes = await fetchMFNav(schemeCode);
-      const nav = navRes.nav || fund.lastNav || 100;
-      fund.lastNav = navRes.nav || fund.lastNav;
-      fund.navLive = navRes.live;
+      const navRes = await fetchMFNavOnDate(schemeCode, date);
+      const nav = navRes || fund.lastNav || 100;
+      const latest = await fetchMFNav(schemeCode); if(latest.nav){ fund.lastNav = latest.nav; fund.navLive = latest.live; }
       fund.entries.push({ id:uid(), date, amount, navAtEntry:nav, units: nav? amount/nav : 0 });
       detail = `${fundName} · ${fmtINR(amount)} on ${date}`;
       saveDB();
@@ -1258,31 +1367,73 @@ function renderEntryPage(){
     }
 
     window._entryCat = cat;
+    window._editingRef = null;
     renderAll();
     const fb = document.getElementById('entryFeedback');
-    if(fb){ fb.style.display='block'; fb.textContent = `Added: ${detail}`; }
+    if(fb){ fb.style.display='block'; fb.textContent = `${wasEditing?'Updated':'Added'}: ${detail}`; }
   });
 
-  mainEl.querySelectorAll('[data-delany]').forEach(b=>b.addEventListener('click',()=>{
-    const [kind, ...rest] = b.dataset.delany.split(':');
-    if(kind==='lot'){
-      const [key, holdingId, lotId] = rest;
-      const h = DB[key].find(x=>x.id===holdingId);
-      if(h){ h.lots = h.lots.filter(l=>l.id!==lotId); if(h.lots.length===0) DB[key] = DB[key].filter(x=>x.id!==holdingId); }
-    } else if(kind==='mf'){
-      const [fundId, entryId] = rest;
-      const fund = DB.mf.find(x=>x.id===fundId);
-      if(fund){ fund.entries = fund.entries.filter(e=>e.id!==entryId); if(fund.entries.length===0) DB.mf = DB.mf.filter(x=>x.id!==fundId); }
-    } else if(kind==='simple'){
-      const [key, entryId] = rest;
-      DB[key] = DB[key].filter(e=>e.id!==entryId);
-    } else if(kind==='post'){
-      const [schemeId, entryId] = rest;
-      const scheme = DB.post.find(s=>s.id===schemeId);
-      if(scheme){ scheme.entries = scheme.entries.filter(e=>e.id!==entryId); }
-    }
+  mainEl.querySelectorAll('[data-editref]').forEach(b=>b.addEventListener('click',()=>{
+    window._editingRef = b.dataset.editref;
+    const data = getEntryDataByRef(window._editingRef);
+    window._entryCat = data.cat;
+    renderAll();
+  }));
+
+  mainEl.querySelectorAll('[data-delany]').forEach(b=>b.addEventListener('click', async ()=>{
+    const ok = await confirmModal('Remove this entry? This can\'t be undone.');
+    if(!ok) return;
+    deleteByRef(b.dataset.delany);
     saveDB(); renderAll();
   }));
+}
+
+function getEntryDataByRef(ref){
+  const [kind, ...rest] = ref.split(':');
+  if(kind==='lot'){
+    const [key, holdingId, lotId] = rest;
+    const h = DB[key].find(x=>x.id===holdingId);
+    const l = h?.lots.find(x=>x.id===lotId);
+    return { cat:key, prefill: l? {symbol:h.symbol, qty:l.qty, buyPrice:l.buyPrice, buyDate:l.buyDate} : {} };
+  }
+  if(kind==='mf'){
+    const [fundId, entryId] = rest;
+    const fund = DB.mf.find(x=>x.id===fundId);
+    const e = fund?.entries.find(x=>x.id===entryId);
+    return { cat:'mf', prefill: e? {fundName:fund.fundName, schemeCode:fund.schemeCode, date:e.date, amount:e.amount} : {} };
+  }
+  if(kind==='simple'){
+    const [key, entryId] = rest;
+    const e = DB[key].find(x=>x.id===entryId);
+    return { cat:key, prefill: e? {date:e.date, amount:e.amount, interest:e.interest} : {} };
+  }
+  if(kind==='post'){
+    const [schemeId, entryId] = rest;
+    const scheme = DB.post.find(x=>x.id===schemeId);
+    const e = scheme?.entries.find(x=>x.id===entryId);
+    return { cat:'post', prefill: e? {schemeName:scheme.schemeName, date:e.date, amount:e.amount, interest:e.interest, maturityDate:scheme.maturityDate, rate:scheme.rate} : {} };
+  }
+  return { cat:'instocks', prefill:{} };
+}
+
+function deleteByRef(ref){
+  const [kind, ...rest] = ref.split(':');
+  if(kind==='lot'){
+    const [key, holdingId, lotId] = rest;
+    const h = DB[key].find(x=>x.id===holdingId);
+    if(h){ h.lots = h.lots.filter(l=>l.id!==lotId); if(h.lots.length===0) DB[key] = DB[key].filter(x=>x.id!==holdingId); }
+  } else if(kind==='mf'){
+    const [fundId, entryId] = rest;
+    const fund = DB.mf.find(x=>x.id===fundId);
+    if(fund){ fund.entries = fund.entries.filter(e=>e.id!==entryId); if(fund.entries.length===0) DB.mf = DB.mf.filter(x=>x.id!==fundId); }
+  } else if(kind==='simple'){
+    const [key, entryId] = rest;
+    DB[key] = DB[key].filter(e=>e.id!==entryId);
+  } else if(kind==='post'){
+    const [schemeId, entryId] = rest;
+    const scheme = DB.post.find(s=>s.id===schemeId);
+    if(scheme){ scheme.entries = scheme.entries.filter(e=>e.id!==entryId); }
+  }
 }
 
 function allEntriesFlat(){
