@@ -312,7 +312,11 @@ if(SYNC_ENABLED){
       fsDoc.get().then(snap=>{
         if(snap.exists){
           const remote = snap.data();
-          if((remote.updatedAt||0) >= (DB.updatedAt||0)){ DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+          if((remote.updatedAt||0) >= (DB.updatedAt||0)){
+            remote.instocks = migrateStockArray(remote.instocks);
+            remote.usstocks = migrateStockArray(remote.usstocks);
+            DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB));
+          }
           else { pushToCloud(); }
         } else {
           pushToCloud(); // first login on this account: upload whatever is local
@@ -324,6 +328,8 @@ if(SYNC_ENABLED){
         if(snap.metadata.hasPendingWrites) return; // ignore echo of our own write
         const remote = snap.data();
         if(remote && remote.updatedAt && remote.updatedAt > (DB.updatedAt||0)){
+          remote.instocks = migrateStockArray(remote.instocks);
+          remote.usstocks = migrateStockArray(remote.usstocks);
           DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB)); renderAll();
         }
       });
@@ -346,10 +352,36 @@ function pushToCloud(){
 
 /* ---------------- data store ---------------- */
 const DB_KEY = 'ledger_portfolio_v1';
+function migrateStockArray(arr){
+  // merges duplicate-symbol rows into one holding with multiple "lots", and
+  // upgrades any legacy flat {qty,buyPrice,buyDate} row into the lots shape.
+  const bySymbol = {};
+  (arr||[]).forEach(h=>{
+    const sym = (h.symbol||'').toUpperCase();
+    if(!sym) return;
+    if(!bySymbol[sym]) bySymbol[sym] = { id: h.id||uid(), symbol: sym, lots: [], lastPrice: null, priceLive: null };
+    const target = bySymbol[sym];
+    if(Array.isArray(h.lots)) target.lots.push(...h.lots);
+    else target.lots.push({ id: uid(), qty: h.qty, buyPrice: h.buyPrice, buyDate: h.buyDate });
+    if(h.lastPrice){ target.lastPrice = h.lastPrice; target.priceLive = h.priceLive; }
+  });
+  return Object.values(bySymbol);
+}
 function loadDB(){
   const raw = localStorage.getItem(DB_KEY);
-  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
-  return { instocks:[], usstocks:[], mf:[], ppf:[], epf:[], post:[], priceCache:{} };
+  let db;
+  if(raw){ try{ db = JSON.parse(raw); }catch(e){} }
+  if(!db) db = { instocks:[], usstocks:[], mf:[], ppf:[], epf:[], post:[], priceCache:{} };
+  const beforeCount = (db.instocks||[]).length + (db.usstocks||[]).length;
+  db.instocks = migrateStockArray(db.instocks);
+  db.usstocks = migrateStockArray(db.usstocks);
+  const afterCount = db.instocks.length + db.usstocks.length;
+  if(afterCount !== beforeCount){
+    // migration merged duplicate-symbol rows — persist the cleaned shape immediately
+    // so it doesn't wait for the next unrelated save (and syncs to other devices sooner)
+    try{ localStorage.setItem(DB_KEY, JSON.stringify(db)); }catch(e){}
+  }
+  return db;
 }
 function saveDB(){
   DB.updatedAt = Date.now();
@@ -359,16 +391,29 @@ function saveDB(){
 let DB = loadDB();
 
 function uid(){ return Math.random().toString(36).slice(2,9); }
+function holdingQty(h){ return (h.lots||[]).reduce((s,l)=>s+l.qty,0); }
+function holdingInvested(h){ return (h.lots||[]).reduce((s,l)=>s+l.qty*l.buyPrice,0); }
+function holdingAvgPrice(h){ const q=holdingQty(h); return q>0 ? holdingInvested(h)/q : 0; }
+function holdingCurrent(h){ return holdingQty(h)*(h.lastPrice||holdingAvgPrice(h)); }
+function addStockLot(key, symbol, qty, buyPrice, buyDate){
+  symbol = (symbol||'').toUpperCase();
+  let h = DB[key].find(x=>x.symbol===symbol);
+  if(!h){ h = {id:uid(), symbol, lots:[], lastPrice:null, priceLive:null}; DB[key].push(h); }
+  h.lots.push({id:uid(), qty, buyPrice, buyDate});
+  return h;
+}
 function fmtINR(n){
   if(n===null||n===undefined||isNaN(n)) return '—';
   const neg = n<0; n=Math.abs(n);
-  let x = n.toFixed(0), lastThree = x.substring(x.length-3), other = x.substring(0,x.length-3);
+  const fixed = n.toFixed(2);
+  const [intPart, decPart] = fixed.split('.');
+  let lastThree = intPart.substring(intPart.length-3), other = intPart.substring(0,intPart.length-3);
   if(other!=='') lastThree = ',' + lastThree;
   const formatted = other.replace(/\B(?=(\d{2})+(?!\d))/g,',') + lastThree;
-  return (neg?'-':'') + '₹' + formatted;
+  return (neg?'-':'') + '₹' + formatted + '.' + decPart;
 }
-function fmtUSD(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '$'+n.toLocaleString('en-US',{maximumFractionDigits:0}); }
-function fmtPct(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return (n>=0?'+':'')+n.toFixed(1)+'%'; }
+function fmtUSD(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtPct(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return (n>=0?'+':'')+n.toFixed(2)+'%'; }
 function daysBetween(a,b){ return (new Date(b)-new Date(a))/(1000*60*60*24); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 
@@ -536,16 +581,16 @@ function allHoldingsFlat(){
   function add(type, inv, cur){ byType[type]=(byType[type]||0)+cur; invested+=inv; current+=cur; }
 
   DB.instocks.forEach(h=>{
-    const inv = h.qty*h.buyPrice;
-    const cur = h.qty*(h.lastPrice||h.buyPrice);
+    const inv = holdingInvested(h);
+    const cur = holdingCurrent(h);
     add('Indian Stocks & ETFs', inv, cur);
-    flows.push({date:h.buyDate, amount:-inv});
+    (h.lots||[]).forEach(l=> flows.push({date:l.buyDate, amount:-(l.qty*l.buyPrice)}));
   });
   DB.usstocks.forEach(h=>{
-    const inv = h.qty*h.buyPrice;
-    const cur = h.qty*(h.lastPrice||h.buyPrice);
+    const inv = holdingInvested(h);
+    const cur = holdingCurrent(h);
     add('US Stocks & ETFs', inv, cur);
-    flows.push({date:h.buyDate, amount:-inv});
+    (h.lots||[]).forEach(l=> flows.push({date:l.buyDate, amount:-(l.qty*l.buyPrice)}));
   });
   DB.mf.forEach(f=>{
     let units=0, inv=0;
@@ -573,8 +618,8 @@ function monthLabel(k){ const [y,m]=k.split('-'); return new Date(y,m-1,1).toLoc
 
 function investedByMonth(){
   const flows = [];
-  DB.instocks.forEach(h=>flows.push({date:h.buyDate, amount:h.qty*h.buyPrice}));
-  DB.usstocks.forEach(h=>flows.push({date:h.buyDate, amount:h.qty*h.buyPrice}));
+  DB.instocks.forEach(h=>(h.lots||[]).forEach(l=>flows.push({date:l.buyDate, amount:l.qty*l.buyPrice})));
+  DB.usstocks.forEach(h=>(h.lots||[]).forEach(l=>flows.push({date:l.buyDate, amount:l.qty*l.buyPrice})));
   DB.mf.forEach(f=>f.entries.forEach(e=>flows.push({date:e.date, amount:e.amount})));
   DB.ppf.forEach(e=>flows.push({date:e.date, amount:e.amount}));
   DB.epf.forEach(e=>flows.push({date:e.date, amount:e.amount}));
@@ -656,7 +701,7 @@ function renderDashboard(){
       <div class="card"><div class="stat-label">Total Invested</div><div class="stat-value">${fmtINR(invested)}</div></div>
       <div class="card"><div class="stat-label">Current Value</div><div class="stat-value">${fmtINR(current)}</div></div>
       <div class="card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'up':'down'}">${fmtINR(gain)}</div><div class="stat-delta ${gain>=0?'up':'down'}">${fmtPct(gainPct)}</div></div>
-      <div class="card"><div class="stat-label">Blended XIRR</div><div class="stat-value ${blendedXirr>=0?'up':'down'}">${blendedXirr!==null?blendedXirr.toFixed(1)+'%':'—'}</div></div>
+      <div class="card"><div class="stat-label">Blended XIRR</div><div class="stat-value ${blendedXirr>=0?'up':'down'}">${blendedXirr!==null?blendedXirr.toFixed(2)+'%':'—'}</div></div>
     </div>
 
     <div class="chart-grid">
@@ -709,7 +754,7 @@ function renderDashboard(){
   });
 
   const proj = projectionSeries();
-  document.getElementById('projSub').textContent = `Assumed rate: ${proj.rate.toFixed(1)}% p.a. · Avg. monthly contribution: ${fmtINR(proj.avgMonthly)}`;
+  document.getElementById('projSub').textContent = `Assumed rate: ${proj.rate.toFixed(2)}% p.a. · Avg. monthly contribution: ${fmtINR(proj.avgMonthly)}`;
   charts.proj = new Chart(document.getElementById('projChart'), {
     type:'bar',
     data:{ labels: proj.points.map(p=>p.label), datasets:[{ label:'Projected Value', data: proj.points.map(p=>p.value), backgroundColor:['#8B96AC','#3ED9A0','#4C8DFF','#D6A93C'], borderRadius:8 }]},
@@ -730,8 +775,8 @@ function renderStocksPage(pageIdx, key, currency){
   const page = PAGES[pageIdx];
   const rows = DB[key];
   const fmt = currency==='USD'?fmtUSD:fmtINR;
-  const totalInv = rows.reduce((s,h)=>s+h.qty*h.buyPrice,0);
-  const totalCur = rows.reduce((s,h)=>s+h.qty*(h.lastPrice||h.buyPrice),0);
+  const totalInv = rows.reduce((s,h)=>s+holdingInvested(h),0);
+  const totalCur = rows.reduce((s,h)=>s+holdingCurrent(h),0);
   const gain = totalCur-totalInv;
 
   const html = `
@@ -739,7 +784,7 @@ function renderStocksPage(pageIdx, key, currency){
       <div>
         <div class="page-eyebrow">${currency==='USD'?'US Markets':'Indian Markets'}</div>
         <div class="page-title">${page.label}</div>
-        <div class="page-sub">Live prices via public market data, cached when offline.</div>
+        <div class="page-sub">Live prices via public market data, cached when offline. Use the "Add Entry" tab to log new buys — adding the same symbol again averages your buy price automatically.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${excelBtnsHtml('stocks')}
@@ -754,30 +799,19 @@ function renderStocksPage(pageIdx, key, currency){
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h3>Add Holding</h3></div>
-      <form id="addForm">
-        <div class="form-row">
-          <div class="field"><label>Symbol ${currency==='USD'?'(e.g. AAPL)':'(NSE, e.g. TCS)'}</label><input required name="symbol" placeholder="${currency==='USD'?'AAPL':'TCS'}"></div>
-          <div class="field"><label>Quantity</label><input required name="qty" type="number" step="any" min="0"></div>
-          <div class="field"><label>Buy Price</label><input required name="buyPrice" type="number" step="any" min="0"></div>
-          <div class="field"><label>Buy Date</label><input required name="buyDate" type="date" value="${todayStr()}"></div>
-        </div>
-        <button class="btn" type="submit">Add Holding</button>
-      </form>
-    </div>
-
-    <div class="panel">
       <div class="panel-head"><h3>Holdings (${rows.length})</h3></div>
       <div class="table-scroll">
-      ${rows.length===0?`<div class="empty-state"><b>No holdings yet</b>Add your first ${currency==='USD'?'US':'Indian'} stock or ETF above.</div>`:`
+      ${rows.length===0?`<div class="empty-state"><b>No holdings yet</b>Use the "Add Entry" tab to log your first ${currency==='USD'?'US':'Indian'} stock or ETF.</div>`:`
       <table>
-        <thead><tr><th>Symbol</th><th>Qty</th><th>Buy Price</th><th>Live Price</th><th>Invested</th><th>Current</th><th>Gain/Loss</th><th></th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy Price</th><th>Live Price</th><th>Invested</th><th>Current</th><th>Gain/Loss</th><th></th></tr></thead>
         <tbody>
           ${rows.map(h=>{
-            const inv=h.qty*h.buyPrice, cur=h.qty*(h.lastPrice||h.buyPrice), g=cur-inv, gp=inv>0?g/inv*100:0;
+            const qty=holdingQty(h), avgPrice=holdingAvgPrice(h), inv=holdingInvested(h), cur=holdingCurrent(h), g=cur-inv, gp=inv>0?g/inv*100:0;
+            const lotCount = (h.lots||[]).length;
+            const lotTitle = (h.lots||[]).map(l=>`${l.qty} @ ${fmt(l.buyPrice)} on ${l.buyDate}`).join(' | ');
             return `<tr>
-              <td class="name">${h.symbol} ${h.priceLive===false?'<span class="badge cached">cached</span>':h.lastPrice?'<span class="badge live">live</span>':''}</td>
-              <td>${h.qty}</td><td>${fmt(h.buyPrice)}</td><td>${h.lastPrice?fmt(h.lastPrice):'—'}</td>
+              <td class="name" title="${lotTitle}">${h.symbol} ${lotCount>1?`<span class="tag">×${lotCount} lots</span>`:''} ${h.priceLive===false?'<span class="badge cached">cached</span>':h.lastPrice?'<span class="badge live">live</span>':''}</td>
+              <td>${qty.toFixed(2)}</td><td>${fmt(avgPrice)}</td><td>${h.lastPrice?fmt(h.lastPrice):'—'}</td>
               <td>${fmt(inv)}</td><td>${fmt(cur)}</td>
               <td class="${g>=0?'up':'down'}">${fmt(g)} (${fmtPct(gp)})</td>
               <td><button class="btn tiny danger" data-del="${h.id}">Remove</button></td>
@@ -790,19 +824,14 @@ function renderStocksPage(pageIdx, key, currency){
   `;
   mainEl.innerHTML = pageShell(page, html);
 
-  document.getElementById('addForm').addEventListener('submit', e=>{
-    e.preventDefault();
-    const f = new FormData(e.target);
-    DB[key].push({ id:uid(), symbol:f.get('symbol').toUpperCase(), qty:+f.get('qty'), buyPrice:+f.get('buyPrice'), buyDate:f.get('buyDate'), lastPrice:null, priceLive:null });
-    saveDB(); renderAll();
-  });
   mainEl.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
     DB[key] = DB[key].filter(h=>h.id!==b.dataset.del); saveDB(); renderAll();
   }));
   document.getElementById('refreshPrices').addEventListener('click', ()=>refreshStockPrices(key, currency, true));
 
   document.getElementById('stocksExport').addEventListener('click', ()=>{
-    const data = rows.map(h=>({ Symbol:h.symbol, Quantity:h.qty, BuyPrice:h.buyPrice, BuyDate:h.buyDate }));
+    const data = [];
+    rows.forEach(h=>(h.lots||[]).forEach(l=> data.push({ Symbol:h.symbol, Quantity:l.qty, BuyPrice:l.buyPrice, BuyDate:l.buyDate })));
     exportToExcel(`${key}-holdings.xlsx`, page.label, data);
   });
   document.getElementById('stocksImportFile').addEventListener('change', async e=>{
@@ -816,11 +845,11 @@ function renderStocksPage(pageIdx, key, currency){
         const buyPrice = parseFloat(r.BuyPrice||r.buyPrice||r['Buy Price']);
         const buyDate = excelDate(r.BuyDate||r.buyDate||r['Buy Date']);
         if(!symbol || !qty || !buyPrice) return;
-        DB[key].push({ id:uid(), symbol, qty, buyPrice, buyDate, lastPrice:null, priceLive:null });
+        addStockLot(key, symbol, qty, buyPrice, buyDate);
         added++;
       });
       saveDB(); renderAll();
-      alert(`Imported ${added} holding(s). Columns expected: Symbol, Quantity, BuyPrice, BuyDate.`);
+      alert(`Imported ${added} lot(s) — same-symbol rows were merged and averaged automatically. Columns expected: Symbol, Quantity, BuyPrice, BuyDate.`);
     }catch(err){ alert('Could not read that file. Make sure it\'s a valid .xlsx/.csv with Symbol, Quantity, BuyPrice, BuyDate columns.'); }
   });
   // auto-fetch once per holding per session — never retries in a loop if a fetch fails
@@ -872,27 +901,13 @@ function renderMF(){
     <div class="stat-grid">
       <div class="card"><div class="stat-label">Total Invested</div><div class="stat-value">${fmtINR(overallInv)}</div></div>
       <div class="card"><div class="stat-label">Current Value</div><div class="stat-value">${fmtINR(overallCur)}</div></div>
-      <div class="card"><div class="stat-label">Overall XIRR</div><div class="stat-value ${overallXirr>=0?'up':'down'}">${overallXirr!==null?overallXirr.toFixed(1)+'%':'—'}</div></div>
-      <div class="card"><div class="stat-label">Overall CAGR</div><div class="stat-value ${overallCagr>=0?'up':'down'}">${overallCagr!==null?overallCagr.toFixed(1)+'%':'—'}</div></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>Add SIP / Lumpsum Entry</h3></div>
-      <form id="mfForm">
-        <div class="form-row">
-          <div class="field"><label>Fund Name</label><input required name="fundName" placeholder="e.g. Parag Parikh Flexi Cap"></div>
-          <div class="field"><label>AMFI Scheme Code</label><input required name="schemeCode" placeholder="e.g. 122639"></div>
-          <div class="field"><label>Date</label><input required name="date" type="date" value="${todayStr()}"></div>
-          <div class="field"><label>Amount Invested</label><input required name="amount" type="number" step="any" min="0"></div>
-        </div>
-        <button class="btn" type="submit">Add Entry</button>
-      </form>
-      <div class="rate-note">Tip: find your fund's scheme code by searching the fund name on amfiindia.com or mfapi.in.</div>
+      <div class="card"><div class="stat-label">Overall XIRR</div><div class="stat-value ${overallXirr>=0?'up':'down'}">${overallXirr!==null?overallXirr.toFixed(2)+'%':'—'}</div></div>
+      <div class="card"><div class="stat-label">Overall CAGR</div><div class="stat-value ${overallCagr>=0?'up':'down'}">${overallCagr!==null?overallCagr.toFixed(2)+'%':'—'}</div></div>
     </div>
 
     <div class="panel">
       <div class="panel-head"><h3>Funds (${DB.mf.length})</h3></div>
-      ${DB.mf.length===0?`<div class="empty-state"><b>No funds yet</b>Add your first SIP or lumpsum entry above.</div>`:
+      ${DB.mf.length===0?`<div class="empty-state"><b>No funds yet</b>Use the "Add Entry" tab to log your first SIP or lumpsum investment.</div>`:
         DB.mf.map(f=>{
           const units=f.entries.reduce((a,e)=>a+e.units,0);
           const inv=f.entries.reduce((a,e)=>a+e.amount,0);
@@ -909,8 +924,8 @@ function renderMF(){
               <div style="display:flex;gap:16px;font-family:'IBM Plex Mono',monospace;font-size:12px;">
                 <span>Inv <b>${fmtINR(inv)}</b></span><span>Cur <b>${fmtINR(cur)}</b></span>
                 <span class="${(cur-inv)>=0?'up':'down'}">${fmtINR(cur-inv)}</span>
-                <span>XIRR <b>${fx!==null?fx.toFixed(1)+'%':'—'}</b></span>
-                <span>CAGR <b>${fCagr!==null?fCagr.toFixed(1)+'%':'—'}</b></span>
+                <span>XIRR <b>${fx!==null?fx.toFixed(2)+'%':'—'}</b></span>
+                <span>CAGR <b>${fCagr!==null?fCagr.toFixed(2)+'%':'—'}</b></span>
               </div>
             </div>
             <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>NAV (on entry)</th><th>Units</th><th></th></tr></thead><tbody>
@@ -921,23 +936,6 @@ function renderMF(){
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
-
-  document.getElementById('mfForm').addEventListener('submit', async e=>{
-    e.preventDefault();
-    const f = new FormData(e.target);
-    const schemeCode = f.get('schemeCode').trim();
-    const fundName = f.get('fundName');
-    const date = f.get('date');
-    const amount = +f.get('amount');
-    let fund = DB.mf.find(x=>x.schemeCode===schemeCode);
-    if(!fund){ fund = {id:uid(), fundName, schemeCode, entries:[], lastNav:null, navLive:null}; DB.mf.push(fund); }
-    const navRes = await fetchMFNav(schemeCode);
-    const nav = navRes.nav || 100; // fallback placeholder if fetch fails and no cache
-    fund.lastNav = navRes.nav || fund.lastNav;
-    fund.navLive = navRes.live;
-    fund.entries.push({ id:uid(), date, amount, navAtEntry:nav, units: nav? amount/nav : 0 });
-    saveDB(); renderAll();
-  });
 
   mainEl.querySelectorAll('[data-delentry]').forEach(b=>b.addEventListener('click',()=>{
     const [fid,eid] = b.dataset.delentry.split('|');
@@ -1013,30 +1011,14 @@ function renderSimpleLedger(pageIdx, key, title, eyebrow){
       <div class="card"><div class="stat-label">Current Balance</div><div class="stat-value">${fmtINR(running)}</div></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h3>Add Entry</h3></div>
-      <form id="ledgerForm">
-        <div class="form-row">
-          <div class="field"><label>Date</label><input required name="date" type="date" value="${todayStr()}"></div>
-          <div class="field"><label>Amount Deposited</label><input required name="amount" type="number" step="any" min="0"></div>
-          <div class="field"><label>Interest Credited (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
-        </div>
-        <button class="btn" type="submit">Add Entry</button>
-      </form>
-    </div>
-    <div class="panel">
       <div class="panel-head"><h3>History (${rows.length})</h3></div>
-      ${rows.length===0?`<div class="empty-state"><b>No entries yet</b>Log your first ${title} deposit above.</div>`:`
+      ${rows.length===0?`<div class="empty-state"><b>No entries yet</b>Use the "Add Entry" tab to log your first ${title} deposit.</div>`:`
       <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Running Balance</th><th></th></tr></thead><tbody>
         ${withBalance.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td><td><button class="btn tiny danger" data-del="${e.id}">Remove</button></td></tr>`).join('')}
       </tbody></table></div>`}
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
-  document.getElementById('ledgerForm').addEventListener('submit', e=>{
-    e.preventDefault(); const f = new FormData(e.target);
-    DB[key].push({id:uid(), date:f.get('date'), amount:+f.get('amount'), interest:+f.get('interest')||0});
-    saveDB(); renderAll();
-  });
   mainEl.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
     DB[key] = DB[key].filter(e=>e.id!==b.dataset.del); saveDB(); renderAll();
   }));
@@ -1068,21 +1050,10 @@ function renderPost(){
   const page = PAGES[6];
   const html = `
     <div class="page-head">
-      <div><div class="page-eyebrow">Manual entry</div><div class="page-title">Post Office Schemes</div><div class="page-sub">Track multiple schemes (NSC, KVP, SCSS, Time Deposit, etc.) separately.</div></div>
+      <div><div class="page-eyebrow">Manual entry</div><div class="page-title">Post Office Schemes</div><div class="page-sub">Track multiple schemes (NSC, KVP, SCSS, Time Deposit, etc.) separately. Use the "Add Entry" tab to create a scheme or log a deposit.</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">${excelBtnsHtml('post')}</div>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h3>Add Scheme</h3></div>
-      <form id="schemeForm">
-        <div class="form-row">
-          <div class="field"><label>Scheme Name</label><input required name="schemeName" placeholder="e.g. NSC, SCSS, Time Deposit"></div>
-          <div class="field"><label>Maturity Date</label><input name="maturityDate" type="date"></div>
-          <div class="field"><label>Interest Rate (% p.a.)</label><input name="rate" type="number" step="any" min="0"></div>
-        </div>
-        <button class="btn" type="submit">Add Scheme</button>
-      </form>
-    </div>
-    ${DB.post.length===0?`<div class="panel"><div class="empty-state"><b>No schemes yet</b>Add a scheme above, then log deposits into it.</div></div>`:
+    ${DB.post.length===0?`<div class="panel"><div class="empty-state"><b>No schemes yet</b>Use the "Add Entry" tab to create your first scheme and log a deposit.</div></div>`:
     DB.post.map(s=>{
       const rows = [...s.entries].sort((a,b)=>new Date(a.date)-new Date(b.date));
       let running=0; const withBal = rows.map(e=>{ running += e.amount+(e.interest||0); return {...e, balance:running}; });
@@ -1097,15 +1068,7 @@ function renderPost(){
           <div class="card"><div class="stat-label">Deposited</div><div class="stat-value">${fmtINR(invested)}</div></div>
           <div class="card"><div class="stat-label">Current Balance</div><div class="stat-value">${fmtINR(running)}</div></div>
         </div>
-        <form class="entryForm" data-scheme="${s.id}">
-          <div class="form-row">
-            <div class="field"><label>Date</label><input required name="date" type="date" value="${todayStr()}"></div>
-            <div class="field"><label>Amount</label><input required name="amount" type="number" step="any" min="0"></div>
-            <div class="field"><label>Interest (optional)</label><input name="interest" type="number" step="any" min="0" value="0"></div>
-          </div>
-          <button class="btn tiny" type="submit">Add Deposit</button>
-        </form>
-        ${rows.length? `<div class="table-scroll" style="margin-top:12px;"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Balance</th><th></th></tr></thead><tbody>
+        ${rows.length? `<div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Balance</th><th></th></tr></thead><tbody>
           ${withBal.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td><td><button class="btn tiny danger" data-delentry="${s.id}|${e.id}">Remove</button></td></tr>`).join('')}
         </tbody></table></div>` : ''}
       </div>`;
@@ -1113,19 +1076,6 @@ function renderPost(){
   `;
   mainEl.innerHTML = pageShell(page, html);
 
-  document.getElementById('schemeForm').addEventListener('submit', e=>{
-    e.preventDefault(); const f = new FormData(e.target);
-    DB.post.push({id:uid(), schemeName:f.get('schemeName'), maturityDate:f.get('maturityDate')||null, rate:+f.get('rate')||null, entries:[]});
-    saveDB(); renderAll();
-  });
-  mainEl.querySelectorAll('.entryForm').forEach(form=>{
-    form.addEventListener('submit', e=>{
-      e.preventDefault(); const f = new FormData(e.target);
-      const scheme = DB.post.find(s=>s.id===form.dataset.scheme);
-      scheme.entries.push({id:uid(), date:f.get('date'), amount:+f.get('amount'), interest:+f.get('interest')||0});
-      saveDB(); renderAll();
-    });
-  });
   mainEl.querySelectorAll('[data-delscheme]').forEach(b=>b.addEventListener('click',()=>{
     DB.post = DB.post.filter(s=>s.id!==b.dataset.delscheme); saveDB(); renderAll();
   }));
@@ -1227,6 +1177,7 @@ function entryFieldsHtml(cat){
 function renderEntryPage(){
   const page = PAGES.find(p=>p.id==='entry');
   const cat = window._entryCat || 'instocks';
+  const allEntries = allEntriesFlat();
   const html = `
     <div class="page-head">
       <div>
@@ -1253,10 +1204,10 @@ function renderEntryPage(){
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h3>Added this session</h3></div>
-      <div id="entryLog">${(window._entryLog||[]).length===0?'<div class="empty-state" style="padding:20px;"><b>Nothing yet</b>Entries you add here will list below as you go.</div>':
-        `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Time</th></tr></thead><tbody>
-          ${window._entryLog.slice().reverse().map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.time}</td></tr>`).join('')}
+      <div class="panel-head"><h3>All Entries (${allEntries.length})</h3></div>
+      ${allEntries.length===0?'<div class="empty-state"><b>Nothing yet</b>Entries you add — across every category — will list here, newest first.</div>':
+        `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Date</th><th></th></tr></thead><tbody>
+          ${allEntries.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date}</td><td><button class="btn tiny danger" data-delany="${e.ref}">Remove</button></td></tr>`).join('')}
         </tbody></table></div>`}
     </div>
   `;
@@ -1275,8 +1226,8 @@ function renderEntryPage(){
 
     if(cat==='instocks' || cat==='usstocks'){
       const symbol = f.get('symbol').toUpperCase(), qty = +f.get('qty'), buyPrice = +f.get('buyPrice'), buyDate = f.get('buyDate');
-      DB[cat].push({ id:uid(), symbol, qty, buyPrice, buyDate, lastPrice:null, priceLive:null });
-      detail = `${symbol} · ${qty} @ ${fmtINR(buyPrice)}`;
+      addStockLot(cat, symbol, qty, buyPrice, buyDate);
+      detail = `${symbol} · ${qty} @ ${fmtINR(buyPrice)} (merged with existing holding if any, price averaged)`;
       saveDB();
     } else if(cat==='mf'){
       const schemeCode = f.get('schemeCode').trim(), fundName = f.get('fundName'), date = f.get('date'), amount = +f.get('amount');
@@ -1306,14 +1257,52 @@ function renderEntryPage(){
       saveDB();
     }
 
-    window._entryLog = window._entryLog || [];
-    window._entryLog.push({ cat: ENTRY_CATEGORIES.find(c=>c.id===cat).label, detail, time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) });
     window._entryCat = cat;
-
     renderAll();
     const fb = document.getElementById('entryFeedback');
     if(fb){ fb.style.display='block'; fb.textContent = `Added: ${detail}`; }
   });
+
+  mainEl.querySelectorAll('[data-delany]').forEach(b=>b.addEventListener('click',()=>{
+    const [kind, ...rest] = b.dataset.delany.split(':');
+    if(kind==='lot'){
+      const [key, holdingId, lotId] = rest;
+      const h = DB[key].find(x=>x.id===holdingId);
+      if(h){ h.lots = h.lots.filter(l=>l.id!==lotId); if(h.lots.length===0) DB[key] = DB[key].filter(x=>x.id!==holdingId); }
+    } else if(kind==='mf'){
+      const [fundId, entryId] = rest;
+      const fund = DB.mf.find(x=>x.id===fundId);
+      if(fund){ fund.entries = fund.entries.filter(e=>e.id!==entryId); if(fund.entries.length===0) DB.mf = DB.mf.filter(x=>x.id!==fundId); }
+    } else if(kind==='simple'){
+      const [key, entryId] = rest;
+      DB[key] = DB[key].filter(e=>e.id!==entryId);
+    } else if(kind==='post'){
+      const [schemeId, entryId] = rest;
+      const scheme = DB.post.find(s=>s.id===schemeId);
+      if(scheme){ scheme.entries = scheme.entries.filter(e=>e.id!==entryId); }
+    }
+    saveDB(); renderAll();
+  }));
+}
+
+function allEntriesFlat(){
+  const out = [];
+  DB.instocks.forEach(h=>(h.lots||[]).forEach(l=>out.push({
+    cat:'Indian Stock/ETF', detail:`${h.symbol} · ${l.qty} @ ${fmtINR(l.buyPrice)}`, date:l.buyDate, ref:`lot:instocks:${h.id}:${l.id}`
+  })));
+  DB.usstocks.forEach(h=>(h.lots||[]).forEach(l=>out.push({
+    cat:'US Stock/ETF', detail:`${h.symbol} · ${l.qty} @ ${fmtUSD(l.buyPrice)}`, date:l.buyDate, ref:`lot:usstocks:${h.id}:${l.id}`
+  })));
+  DB.mf.forEach(fund=>fund.entries.forEach(e=>out.push({
+    cat:'Mutual Fund', detail:`${fund.fundName} · ${fmtINR(e.amount)}`, date:e.date, ref:`mf:${fund.id}:${e.id}`
+  })));
+  DB.ppf.forEach(e=>out.push({ cat:'PPF', detail:`${fmtINR(e.amount)}${e.interest?' + '+fmtINR(e.interest)+' interest':''}`, date:e.date, ref:`simple:ppf:${e.id}` }));
+  DB.epf.forEach(e=>out.push({ cat:'EPF', detail:`${fmtINR(e.amount)}${e.interest?' + '+fmtINR(e.interest)+' interest':''}`, date:e.date, ref:`simple:epf:${e.id}` }));
+  DB.post.forEach(s=>s.entries.forEach(e=>out.push({
+    cat:'Post Office', detail:`${s.schemeName} · ${fmtINR(e.amount)}`, date:e.date, ref:`post:${s.id}:${e.id}`
+  })));
+  out.sort((a,b)=> new Date(b.date) - new Date(a.date));
+  return out;
 }
 
 /* ================= ROUTER ================= */
