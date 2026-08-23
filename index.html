@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ledger — My Portfolio</title>
+<title>All in One Portfolio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -51,7 +51,7 @@ input,select{font-family:inherit;}
 
 /* ---------- sidebar ---------- */
 .sidebar{
-  width:230px;
+  width:250px;
   flex-shrink:0;
   background:#0D1220;
   border-right:1px solid var(--border-soft);
@@ -66,9 +66,9 @@ input,select{font-family:inherit;}
   display:flex;align-items:center;justify-content:space-between;
   padding:22px 18px;border-bottom:1px solid var(--border-soft);
 }
-.sb-logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;}
+.sb-logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:13.5px;letter-spacing:.01em;white-space:nowrap;overflow:hidden;}
 .sb-logo .mark{width:22px;height:22px;flex-shrink:0;border-radius:6px;background:linear-gradient(135deg,var(--mint),var(--blue));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#061018;}
-.sidebar.collapsed .sb-logo span{display:none;}
+.sidebar.collapsed .sb-logo span:not(.mark){display:none;}
 .sb-toggle{
   background:none;border:none;color:var(--ink-dim);width:28px;height:28px;border-radius:8px;
   display:flex;align-items:center;justify-content:center;flex-shrink:0;
@@ -84,7 +84,7 @@ input,select{font-family:inherit;}
 .sb-item:hover{background:#ffffff08;color:var(--ink);}
 .sb-item.active{background:#ffffff0f;color:var(--ink);border-color:var(--border-soft);}
 .sb-item.active .dot{width:6px;height:6px;border-radius:50%;background:var(--accent,var(--mint));margin-left:auto;flex-shrink:0;}
-.sidebar.collapsed .sb-item span:not(.dot),.sidebar.collapsed .sb-item .dot{display:none;}
+.sidebar.collapsed .sb-item span:not(.ic){display:none;}
 .sidebar.collapsed .sb-item{justify-content:center;}
 .sb-foot{padding:14px 18px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;}
 .sidebar.collapsed .sb-foot{opacity:0;}
@@ -160,6 +160,8 @@ input,select{font-family:inherit;}
   width:100%;background:#ffffff08;border:1px solid var(--border-soft);color:var(--ink);
   padding:9px 10px;border-radius:8px;font-size:13px;
 }
+.field select{color-scheme:dark;}
+.field select option{background:#121826;color:#EAF0FA;}
 .field input:focus,.field select:focus{outline:2px solid var(--accent,var(--mint));outline-offset:0;border-color:transparent;}
 
 table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -201,8 +203,8 @@ tbody td.name{font-family:'Inter',sans-serif;font-weight:500;}
 <div id="authGate" style="display:none;position:fixed;inset:0;z-index:100;background:#0A0E16;align-items:center;justify-content:center;padding:20px;">
   <div style="width:100%;max-width:360px;background:#121826;border:1px solid #ffffff14;border-radius:16px;padding:28px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-      <span style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#3ED9A0,#4C8DFF);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#061018;font-family:Manrope,sans-serif;">L</span>
-      <b style="font-family:Manrope,sans-serif;font-size:16px;">Ledger</b>
+      <span style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#3ED9A0,#4C8DFF);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#061018;font-family:Manrope,sans-serif;">A</span>
+      <b style="font-family:Manrope,sans-serif;font-size:16px;">All in One Portfolio</b>
     </div>
     <p style="color:#8B96AC;font-size:12.5px;margin-bottom:20px;">Sign in to sync your portfolio across every device.</p>
     <form id="authForm">
@@ -221,7 +223,7 @@ tbody td.name{font-family:'Inter',sans-serif;font-weight:500;}
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-top">
-      <div class="sb-logo"><span class="mark">L</span><span>Ledger</span></div>
+      <div class="sb-logo"><span class="mark">A</span><span>All in One Portfolio</span></div>
       <button class="sb-toggle" id="sbToggle" title="Collapse/expand">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" id="sbArrow"/></svg>
       </button>
