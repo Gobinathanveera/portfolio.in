@@ -881,7 +881,7 @@ function renderStocksPage(pageIdx, key, currency){
       <div class="table-scroll">
       ${rows.length===0?`<div class="empty-state"><b>No holdings yet</b>Use the "Add Entry" tab to log your first ${currency==='USD'?'US':'Indian'} stock or ETF.</div>`:`
       <table>
-        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy Price</th><th>Live Price</th><th>Invested</th>${isUSD?'<th>₹ Invested (at txn date)</th>':''}<th>Current</th><th>Gain/Loss</th><th></th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Buy Price</th><th>Live Price</th><th>Invested</th>${isUSD?'<th>₹ Invested (at txn date)</th>':''}<th>Current</th><th>Gain/Loss</th></tr></thead>
         <tbody>
           ${rows.map(h=>{
             const qty=holdingQty(h), avgPrice=holdingAvgPrice(h), inv=holdingInvested(h), cur=holdingCurrent(h), g=cur-inv, gp=inv>0?g/inv*100:0;
@@ -893,7 +893,6 @@ function renderStocksPage(pageIdx, key, currency){
               <td>${qty.toFixed(2)}</td><td>${fmt(avgPrice)}</td><td>${h.lastPrice?fmt(h.lastPrice):'—'}</td>
               <td>${fmt(inv)}</td>${isUSD?`<td>${fmtINR(invInr)}</td>`:''}<td>${fmt(cur)}</td>
               <td class="${g>=0?'up':'down'}">${fmt(g)} (${fmtPct(gp)})</td>
-              <td><button class="btn tiny danger" data-del="${h.id}">Remove</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -903,9 +902,6 @@ function renderStocksPage(pageIdx, key, currency){
   `;
   mainEl.innerHTML = pageShell(page, html);
 
-  mainEl.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
-    DB[key] = DB[key].filter(h=>h.id!==b.dataset.del); saveDB(); renderAll();
-  }));
   document.getElementById('refreshPrices').addEventListener('click', ()=>refreshStockPrices(key, currency, true));
 
   document.getElementById('stocksExport').addEventListener('click', ()=>{
@@ -1008,8 +1004,8 @@ function renderMF(){
                 <span>CAGR <b>${fCagr!==null?fCagr.toFixed(2)+'%':'—'}</b></span>
               </div>
             </div>
-            <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>NAV (on entry)</th><th>Units</th><th></th></tr></thead><tbody>
-              ${f.entries.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.navAtEntry?e.navAtEntry.toFixed(2):'—'}</td><td>${e.units?e.units.toFixed(3):'—'}</td><td><button class="btn tiny danger" data-delentry="${f.id}|${e.id}">Remove</button></td></tr>`).join('')}
+            <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>NAV (on entry)</th><th>Units</th></tr></thead><tbody>
+              ${f.entries.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.navAtEntry?e.navAtEntry.toFixed(2):'—'}</td><td>${e.units?e.units.toFixed(3):'—'}</td></tr>`).join('')}
             </tbody></table></div>
           </div>`;
         }).join('')}
@@ -1017,13 +1013,6 @@ function renderMF(){
   `;
   mainEl.innerHTML = pageShell(page, html);
 
-  mainEl.querySelectorAll('[data-delentry]').forEach(b=>b.addEventListener('click',()=>{
-    const [fid,eid] = b.dataset.delentry.split('|');
-    const fund = DB.mf.find(x=>x.id===fid);
-    fund.entries = fund.entries.filter(e=>e.id!==eid);
-    if(fund.entries.length===0) DB.mf = DB.mf.filter(x=>x.id!==fid);
-    saveDB(); renderAll();
-  }));
   document.getElementById('mfExport').addEventListener('click', ()=>{
     const data = [];
     DB.mf.forEach(f=>f.entries.forEach(e=>data.push({ FundName:f.fundName, SchemeCode:f.schemeCode, Date:e.date, Amount:e.amount })));
@@ -1093,15 +1082,12 @@ function renderSimpleLedger(pageIdx, key, title, eyebrow){
     <div class="panel">
       <div class="panel-head"><h3>History (${rows.length})</h3></div>
       ${rows.length===0?`<div class="empty-state"><b>No entries yet</b>Use the "Add Entry" tab to log your first ${title} deposit.</div>`:`
-      <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Running Balance</th><th></th></tr></thead><tbody>
-        ${withBalance.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td><td><button class="btn tiny danger" data-del="${e.id}">Remove</button></td></tr>`).join('')}
+      <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Running Balance</th></tr></thead><tbody>
+        ${withBalance.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td></tr>`).join('')}
       </tbody></table></div>`}
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
-  mainEl.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
-    DB[key] = DB[key].filter(e=>e.id!==b.dataset.del); saveDB(); renderAll();
-  }));
   document.getElementById('ledgerExport').addEventListener('click', ()=>{
     const data = rows.map(e=>({ Date:e.date, Amount:e.amount, Interest:e.interest||0 }));
     exportToExcel(`${key}-history.xlsx`, title, data);
@@ -1142,29 +1128,19 @@ function renderPost(){
       <div class="panel">
         <div class="panel-head">
           <h3>${s.schemeName} <span class="tag">${s.rate?s.rate+'% p.a.':''} ${s.maturityDate?'· matures '+s.maturityDate:''}</span></h3>
-          <button class="btn tiny danger" data-delscheme="${s.id}">Remove Scheme</button>
         </div>
         <div class="stat-grid" style="margin-bottom:14px;">
           <div class="card"><div class="stat-label">Deposited</div><div class="stat-value">${fmtINR(invested)}</div></div>
           <div class="card"><div class="stat-label">Current Balance</div><div class="stat-value">${fmtINR(running)}</div></div>
         </div>
-        ${rows.length? `<div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Balance</th><th></th></tr></thead><tbody>
-          ${withBal.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td><td><button class="btn tiny danger" data-delentry="${s.id}|${e.id}">Remove</button></td></tr>`).join('')}
+        ${rows.length? `<div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Interest</th><th>Balance</th></tr></thead><tbody>
+          ${withBal.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.interest?fmtINR(e.interest):'—'}</td><td><b>${fmtINR(e.balance)}</b></td></tr>`).join('')}
         </tbody></table></div>` : ''}
       </div>`;
     }).join('')}
   `;
   mainEl.innerHTML = pageShell(page, html);
 
-  mainEl.querySelectorAll('[data-delscheme]').forEach(b=>b.addEventListener('click',()=>{
-    DB.post = DB.post.filter(s=>s.id!==b.dataset.delscheme); saveDB(); renderAll();
-  }));
-  mainEl.querySelectorAll('[data-delentry]').forEach(b=>b.addEventListener('click',()=>{
-    const [sid,eid] = b.dataset.delentry.split('|');
-    const scheme = DB.post.find(s=>s.id===sid);
-    scheme.entries = scheme.entries.filter(e=>e.id!==eid);
-    saveDB(); renderAll();
-  }));
   document.getElementById('postExport').addEventListener('click', ()=>{
     const data = [];
     DB.post.forEach(s=>s.entries.forEach(e=>data.push({
