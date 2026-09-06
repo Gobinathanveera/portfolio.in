@@ -985,6 +985,7 @@ function renderMF(){
       <div class="panel-head"><h3>Funds (${DB.mf.length})</h3></div>
       ${DB.mf.length===0?`<div class="empty-state"><b>No funds yet</b>Use the "Add Entry" tab to log your first SIP or lumpsum investment.</div>`:
         DB.mf.map(f=>{
+          const expanded = window._mfExpanded && window._mfExpanded.has(f.id);
           const units=f.entries.reduce((a,e)=>a+e.units,0);
           const inv=f.entries.reduce((a,e)=>a+e.amount,0);
           const cur=units*(f.lastNav||0);
@@ -996,7 +997,12 @@ function renderMF(){
           return `
           <div style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #ffffff0a;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-              <div><b>${f.fundName}</b> <span class="tag">code ${f.schemeCode} · ${f.lastNav?'NAV '+f.lastNav.toFixed(2)+(f.navLive===false?' (cached)':' (live)'):'NAV pending'}</span></div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button class="btn tiny ghost" data-mftoggle="${f.id}" style="padding:4px 8px;" title="${expanded?'Collapse':'Expand'} entries">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="transform:rotate(${expanded?90:0}deg);transition:transform .15s;"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div><b>${f.fundName}</b> <span class="tag">code ${f.schemeCode} · ${f.lastNav?'NAV '+f.lastNav.toFixed(2)+(f.navLive===false?' (cached)':' (live)'):'NAV pending'} · ${f.entries.length} ${f.entries.length===1?'entry':'entries'}</span></div>
+              </div>
               <div style="display:flex;gap:16px;font-family:'IBM Plex Mono',monospace;font-size:12px;">
                 <span>Inv <b>${fmtINR(inv)}</b></span><span>Cur <b>${fmtINR(cur)}</b></span>
                 <span class="${(cur-inv)>=0?'up':'down'}">${fmtINR(cur-inv)}</span>
@@ -1004,14 +1010,22 @@ function renderMF(){
                 <span>CAGR <b>${fCagr!==null?fCagr.toFixed(2)+'%':'—'}</b></span>
               </div>
             </div>
-            <div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>NAV (on entry)</th><th>Units</th></tr></thead><tbody>
-              ${f.entries.map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.navAtEntry?e.navAtEntry.toFixed(2):'—'}</td><td>${e.units?e.units.toFixed(3):'—'}</td></tr>`).join('')}
-            </tbody></table></div>
+            ${expanded?`<div class="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>NAV (on entry)</th><th>Units</th></tr></thead><tbody>
+              ${f.entries.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=>`<tr><td>${e.date}</td><td>${fmtINR(e.amount)}</td><td>${e.navAtEntry?e.navAtEntry.toFixed(2):'—'}</td><td>${e.units?e.units.toFixed(3):'—'}</td></tr>`).join('')}
+            </tbody></table></div>`:''}
           </div>`;
         }).join('')}
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
+
+  window._mfExpanded = window._mfExpanded || new Set();
+  mainEl.querySelectorAll('[data-mftoggle]').forEach(b=>b.addEventListener('click',()=>{
+    const id = b.dataset.mftoggle;
+    if(window._mfExpanded.has(id)) window._mfExpanded.delete(id);
+    else window._mfExpanded.add(id);
+    renderAll();
+  }));
 
   document.getElementById('mfExport').addEventListener('click', ()=>{
     const data = [];
@@ -1238,7 +1252,6 @@ function entryFieldsHtml(cat, prefill){
 function renderEntryPage(){
   const page = PAGES.find(p=>p.id==='entry');
   const cat = window._entryCat || 'instocks';
-  const allEntries = allEntriesFlat();
   const editingRef = window._editingRef || null;
   const editData = editingRef ? getEntryDataByRef(editingRef) : null;
   const html = `
@@ -1271,15 +1284,24 @@ function renderEntryPage(){
     </div>
 
     <div class="panel">
-      <div class="panel-head"><h3>All Entries (${allEntries.length})</h3></div>
-      ${allEntries.length===0?'<div class="empty-state"><b>Nothing yet</b>Entries you add — across every category — will list here, newest first.</div>':
-        `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Date</th><th></th></tr></thead><tbody>
-          ${allEntries.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date}</td><td><button class="btn tiny ghost" data-editref="${e.ref}">Edit</button> <button class="btn tiny danger" data-delany="${e.ref}">Remove</button></td></tr>`).join('')}
-        </tbody></table></div>`}
+      <div class="panel-head" style="margin-bottom:10px;"><h3>All Entries</h3></div>
+      <div class="form-row" style="margin-bottom:14px;">
+        <div class="field" style="max-width:320px;">
+          <label>Search by name</label>
+          <input type="text" id="entrySearch" placeholder="e.g. TCS, NSC, Parag Parikh..." value="${(window._entryFilter||'').replace(/"/g,'&quot;')}">
+        </div>
+      </div>
+      <div id="allEntriesWrap">${entriesListHtml(window._entryFilter||'')}</div>
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
 
+  document.getElementById('entrySearch').addEventListener('input', e=>{
+    window._entryFilter = e.target.value;
+    document.getElementById('allEntriesWrap').innerHTML = entriesListHtml(window._entryFilter);
+    wireEntryListButtons();
+  });
+  wireEntryListButtons();
   document.getElementById('entryCategory').addEventListener('change', e=>{
     window._entryCat = e.target.value;
     document.getElementById('entryFieldsWrap').innerHTML = entryFieldsHtml(window._entryCat, null);
@@ -1349,19 +1371,33 @@ function renderEntryPage(){
     if(fb){ fb.style.display='block'; fb.textContent = `${wasEditing?'Updated':'Added'}: ${detail}`; }
   });
 
-  mainEl.querySelectorAll('[data-editref]').forEach(b=>b.addEventListener('click',()=>{
-    window._editingRef = b.dataset.editref;
-    const data = getEntryDataByRef(window._editingRef);
-    window._entryCat = data.cat;
-    renderAll();
-  }));
+  function wireEntryListButtons(){
+    mainEl.querySelectorAll('[data-editref]').forEach(b=>b.addEventListener('click',()=>{
+      window._editingRef = b.dataset.editref;
+      const data = getEntryDataByRef(window._editingRef);
+      window._entryCat = data.cat;
+      renderAll();
+    }));
+    mainEl.querySelectorAll('[data-delany]').forEach(b=>b.addEventListener('click', async ()=>{
+      const ok = await confirmModal('Remove this entry? This can\'t be undone.');
+      if(!ok) return;
+      deleteByRef(b.dataset.delany);
+      saveDB(); renderAll();
+    }));
+  }
+}
 
-  mainEl.querySelectorAll('[data-delany]').forEach(b=>b.addEventListener('click', async ()=>{
-    const ok = await confirmModal('Remove this entry? This can\'t be undone.');
-    if(!ok) return;
-    deleteByRef(b.dataset.delany);
-    saveDB(); renderAll();
-  }));
+function entriesListHtml(filterText){
+  const all = allEntriesFlat();
+  const q = (filterText||'').trim().toLowerCase();
+  const filtered = q ? all.filter(e => (e.detail+' '+e.cat).toLowerCase().includes(q)) : all;
+  return `
+    <div class="panel-head" style="margin-bottom:8px;"><h3 style="font-size:13px;color:var(--ink-dim);font-weight:600;">${filtered.length}${q?` of ${all.length}`:''} ${filtered.length===1?'entry':'entries'}</h3></div>
+    ${filtered.length===0? (q? `<div class="empty-state"><b>No matches</b>Nothing found for "${filterText}".</div>` : '<div class="empty-state"><b>Nothing yet</b>Entries you add — across every category — will list here, newest first.</div>') :
+      `<div class="table-scroll"><table><thead><tr><th>Category</th><th>Detail</th><th>Date</th><th></th></tr></thead><tbody>
+        ${filtered.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date}</td><td><button class="btn tiny ghost" data-editref="${e.ref}">Edit</button> <button class="btn tiny danger" data-delany="${e.ref}">Remove</button></td></tr>`).join('')}
+      </tbody></table></div>`}
+  `;
 }
 
 function getEntryDataByRef(ref){
