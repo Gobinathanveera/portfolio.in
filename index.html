@@ -58,7 +58,9 @@ input,select{font-family:inherit;}
   display:flex;
   flex-direction:column;
   transition:width .25s cubic-bezier(.4,0,.2,1);
-  position:relative;
+  position:sticky;
+  top:0;
+  height:100vh;
   z-index:20;
 }
 .sidebar.collapsed{width:72px;}
@@ -726,9 +728,9 @@ function investedByMonth(){
   return {labels:months.map(monthLabel), invested:investedCum, value:valueCum};
 }
 
-function computeProjection(flows, current){
+function computeProjection(flows, current, fixedRate){
   const blended = xirr(flows);
-  const rate = (blended && isFinite(blended)) ? Math.max(-5, blended) : 8;
+  const rate = (fixedRate!=null) ? fixedRate : ((blended && isFinite(blended)) ? Math.max(-5, blended) : 8);
   // average monthly contribution from actual entries
   const allDates = flows.filter(f=>f.amount<0).map(f=>f.date).sort();
   let months = 1;
@@ -1141,6 +1143,12 @@ function renderMF(){
 const sessionTriedNav = new Set(); // fund ids attempted this session
 
 /* ================= PPF / EPF (auto running balance) ================= */
+// Official government-declared rates — PPF is reviewed quarterly by the Ministry of Finance
+// (7.1% p.a. since April 2020, confirmed for Q2 FY 2026-27); EPF is reviewed annually by EPFO
+// (8.25% p.a. for FY 2025-26). Update these if the government revises them.
+const PPF_OFFICIAL_RATE = 7.1;
+const EPF_OFFICIAL_RATE = 8.25;
+
 function renderSimpleLedger(pageIdx, key, title, eyebrow){
   const page = PAGES[pageIdx];
   const rows = [...DB[key]].sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1176,8 +1184,9 @@ function renderSimpleLedger(pageIdx, key, title, eyebrow){
   if(rows.length>0){
     const flows = rows.map(e=>({date:e.date, amount:-(e.amount)}));
     if(running>0) flows.push({date:todayStr(), amount:running});
-    const proj = computeProjection(flows, running);
-    document.getElementById('ledgerProjSub').textContent = `Assumed rate: ${proj.rate.toFixed(2)}% p.a. · Avg. monthly contribution: ${fmtINR(proj.avgMonthly)}`;
+    const officialRate = key==='ppf' ? PPF_OFFICIAL_RATE : EPF_OFFICIAL_RATE;
+    const proj = computeProjection(flows, running, officialRate);
+    document.getElementById('ledgerProjSub').textContent = `Official ${title} rate: ${officialRate.toFixed(2)}% p.a. (as currently declared${key==='ppf'?' by the Ministry of Finance, reviewed quarterly':' by EPFO, reviewed annually'}) · Avg. monthly contribution: ${fmtINR(proj.avgMonthly)}`;
     destroyChart('ledgerProj');
     const accentColor = key==='ppf' ? '#E0A83E' : '#FB7185';
     charts.ledgerProj = new Chart(document.getElementById('ledgerProjChart'), {
