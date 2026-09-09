@@ -282,6 +282,7 @@ const FIREBASE_CONFIG = {
 };
 const SYNC_ENABLED = FIREBASE_CONFIG.apiKey !== "PASTE_YOUR_API_KEY";
 let currentUser = null, fsDoc = null, pushTimer = null;
+let cloudSyncSettled = !SYNC_ENABLED; // gate: no cloud push is allowed until we've established the authoritative starting state (prevents an early auto-save from overwriting real cloud data with a stale/incomplete local copy)
 
 if(SYNC_ENABLED){
   firebase.initializeApp(FIREBASE_CONFIG);
@@ -318,13 +319,19 @@ if(SYNC_ENABLED){
             remote.instocks = migrateStockArray(remote.instocks);
             remote.usstocks = migrateStockArray(remote.usstocks);
             DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB));
+            cloudSyncSettled = true;
           }
-          else { pushToCloud(); }
+          else { cloudSyncSettled = true; pushToCloud(); }
         } else {
+          cloudSyncSettled = true;
           pushToCloud(); // first login on this account: upload whatever is local
         }
         renderAll();
         setTimeout(()=>{ const link=document.getElementById('signOutLink'); if(link) link.addEventListener('click', e=>{ e.preventDefault(); auth.signOut(); location.reload(); }); }, 0);
+      }).catch(()=>{
+        // couldn't reach Firestore at all — do NOT flip cloudSyncSettled, so any local
+        // save this session stays local-only rather than risking a push of an unmerged state
+        renderAll();
       });
       fsDoc.onSnapshot(snap=>{
         if(snap.metadata.hasPendingWrites) return; // ignore echo of our own write
@@ -347,9 +354,39 @@ if(SYNC_ENABLED){
 }
 
 function pushToCloud(){
-  if(!SYNC_ENABLED || !fsDoc) return;
+  if(!SYNC_ENABLED || !fsDoc || !cloudSyncSettled) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(()=>{ fsDoc.set(DB).catch(()=>{}); }, 600);
+  pushTimer = setTimeout(()=>{ fsDoc.set(DB).catch(()=>{}); dailyBackupIfNeeded(); }, 600);
+}
+let lastBackupDate = null;
+function dailyBackupIfNeeded(){
+  // maintains a rolling once-per-day snapshot in a separate Firestore subcollection,
+  // so a bad overwrite of the main document still leaves a same-day-or-earlier restore point
+  if(!SYNC_ENABLED || !currentUser) return;
+  const today = todayStr();
+  if(lastBackupDate === today) return;
+  lastBackupDate = today;
+  try{
+    firebase.firestore().collection('portfolios').doc(currentUser.uid).collection('backups').doc(today).set(DB).catch(()=>{});
+  }catch(e){}
+}
+
+/* ---------------- manual full backup (JSON) ---------------- */
+function downloadFullBackup(){
+  const blob = new Blob([JSON.stringify(DB, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `portfolio-backup-${todayStr().replace(/-/g,'')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function readBackupFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{ try{ resolve(JSON.parse(e.target.result)); }catch(err){ reject(err); } };
+    reader.onerror = ()=>reject(new Error('read failed'));
+    reader.readAsText(file);
+  });
 }
 
 /* ---------------- data store ---------------- */
@@ -1355,7 +1392,13 @@ function renderEntryPage(){
         <div class="page-title">${page.label}</div>
         <div class="page-sub">Pick a category, log an entry, and keep going — no need to switch tabs.</div>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" id="downloadBackupBtn">Download Full Backup</button>
+        <button class="btn ghost" id="restoreBackupBtn">Restore Backup</button>
+        <input type="file" id="restoreBackupFile" accept=".json" style="display:none;">
+      </div>
     </div>
+    <div class="rate-note" style="margin:-10px 0 16px;">Download a backup any time — it's a plain JSON file of everything in the app. Keep a recent copy somewhere safe.</div>
 
     <div class="panel">
       <div class="form-row">
@@ -1389,6 +1432,28 @@ function renderEntryPage(){
     </div>
   `;
   mainEl.innerHTML = pageShell(page, html);
+
+  document.getElementById('downloadBackupBtn').addEventListener('click', downloadFullBackup);
+  document.getElementById('restoreBackupBtn').addEventListener('click', ()=>document.getElementById('restoreBackupFile').click());
+  document.getElementById('restoreBackupFile').addEventListener('change', async e=>{
+    const file = e.target.files[0]; if(!file) return;
+    try{
+      const parsed = await readBackupFile(file);
+      if(!parsed || typeof parsed !== 'object'){ alert('That file doesn\'t look like a valid backup.'); return; }
+      const ok = await confirmModal('Restore this backup? It will replace everything currently in the app — your current data will be overwritten with what\'s in this file.');
+      if(!ok) return;
+      DB = {
+        instocks: migrateStockArray(parsed.instocks||[]),
+        usstocks: migrateStockArray(parsed.usstocks||[]),
+        mf: parsed.mf||[], ppf: parsed.ppf||[], epf: parsed.epf||[], post: parsed.post||[],
+        priceCache: parsed.priceCache||{}
+      };
+      saveDB();
+      renderAll();
+      const fb = document.getElementById('entryFeedback');
+      if(fb){ fb.style.display='block'; fb.textContent = 'Backup restored successfully.'; }
+    }catch(err){ alert('Couldn\'t read that file — make sure it\'s a backup JSON downloaded from this app.'); }
+  });
 
   document.getElementById('entrySearch').addEventListener('input', e=>{
     window._entryFilter = e.target.value;
