@@ -370,6 +370,22 @@ function dailyBackupIfNeeded(){
     firebase.firestore().collection('portfolios').doc(currentUser.uid).collection('backups').doc(today).set(DB).catch(()=>{});
   }catch(e){}
 }
+async function forcePushToCloud(){
+  // manual, immediate, no-debounce push — bypasses the automatic timer entirely so you
+  // can push right now on demand, regardless of the automatic sync's current state
+  if(!SYNC_ENABLED || !fsDoc) return {ok:false, reason:'Cloud sync isn\'t set up on this device.'};
+  clearTimeout(pushTimer);
+  DB.updatedAt = Date.now();
+  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  try{
+    await fsDoc.set(DB);
+    cloudSyncSettled = true;
+    dailyBackupIfNeeded();
+    return {ok:true};
+  }catch(e){
+    return {ok:false, reason:e.message||'Could not reach the cloud right now.'};
+  }
+}
 
 /* ---------------- manual full backup (JSON) ---------------- */
 function downloadFullBackup(){
@@ -1393,6 +1409,7 @@ function renderEntryPage(){
         <div class="page-sub">Pick a category, log an entry, and keep going — no need to switch tabs.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${SYNC_ENABLED?`<button class="btn" id="pushCloudBtn">Push to Cloud Now</button>`:''}
         <button class="btn ghost" id="downloadBackupBtn">Download Full Backup</button>
         <button class="btn ghost" id="restoreBackupBtn">Restore Backup</button>
         <input type="file" id="restoreBackupFile" accept=".json" style="display:none;">
@@ -1433,6 +1450,22 @@ function renderEntryPage(){
   `;
   mainEl.innerHTML = pageShell(page, html);
 
+  if(SYNC_ENABLED){
+    document.getElementById('pushCloudBtn').addEventListener('click', async ()=>{
+      const ok = await confirmModal('Push everything on this device to the cloud right now? This will overwrite the cloud copy with whatever is currently showing here.');
+      if(!ok) return;
+      const btn = document.getElementById('pushCloudBtn');
+      btn.textContent = 'Pushing…'; btn.disabled = true;
+      const result = await forcePushToCloud();
+      btn.textContent = 'Push to Cloud Now'; btn.disabled = false;
+      const fb = document.getElementById('entryFeedback');
+      if(fb){
+        fb.style.display = 'block';
+        if(result.ok){ fb.style.background='#34D39922'; fb.style.color='var(--green)'; fb.textContent = 'Pushed to cloud successfully.'; }
+        else { fb.style.background='#F8717122'; fb.style.color='var(--red)'; fb.textContent = 'Push failed: '+result.reason; }
+      }
+    });
+  }
   document.getElementById('downloadBackupBtn').addEventListener('click', downloadFullBackup);
   document.getElementById('restoreBackupBtn').addEventListener('click', ()=>document.getElementById('restoreBackupFile').click());
   document.getElementById('restoreBackupFile').addEventListener('change', async e=>{
