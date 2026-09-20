@@ -281,13 +281,14 @@ const FIREBASE_CONFIG = {
   appId: "1:548121507754:web:0d287b8ce347db9a29ddd3"
 };
 const SYNC_ENABLED = FIREBASE_CONFIG.apiKey !== "PASTE_YOUR_API_KEY";
-let currentUser = null, fsDoc = null, pushTimer = null;
+let currentUser = null, fsDoc = null, pushTimer = null, firestoreDb = null;
 let cloudSyncSettled = !SYNC_ENABLED; // gate: no cloud push is allowed until we've established the authoritative starting state (prevents an early auto-save from overwriting real cloud data with a stale/incomplete local copy)
+let lastKnownRemoteUpdatedAt = 0; // the newest server updatedAt we've actually confirmed — used to detect "someone/something else wrote since I last synced" before ever overwriting the cloud
 
 if(SYNC_ENABLED){
   firebase.initializeApp(FIREBASE_CONFIG);
   const auth = firebase.auth();
-  const firestore = firebase.firestore();
+  firestoreDb = firebase.firestore();
 
   document.getElementById('authForm').addEventListener('submit', e=>{
     e.preventDefault();
@@ -309,12 +310,13 @@ if(SYNC_ENABLED){
       currentUser = user;
       document.getElementById('authGate').style.display='none';
       document.getElementById('shell').style.display='flex';
-      fsDoc = firestore.collection('portfolios').doc(user.uid);
+      fsDoc = firestoreDb.collection('portfolios').doc(user.uid);
       const foot = document.getElementById('sbFoot');
       if(foot) foot.innerHTML = `Synced · ${user.email}<br><a href="#" id="signOutLink" style="color:#3ED9A0;">Sign out</a>`;
       fsDoc.get().then(snap=>{
         if(snap.exists){
           const remote = snap.data();
+          lastKnownRemoteUpdatedAt = remote.updatedAt||0;
           if((remote.updatedAt||0) >= (DB.updatedAt||0)){
             remote.instocks = migrateStockArray(remote.instocks);
             remote.usstocks = migrateStockArray(remote.usstocks);
@@ -336,10 +338,14 @@ if(SYNC_ENABLED){
       fsDoc.onSnapshot(snap=>{
         if(snap.metadata.hasPendingWrites) return; // ignore echo of our own write
         const remote = snap.data();
-        if(remote && remote.updatedAt && remote.updatedAt > (DB.updatedAt||0)){
-          remote.instocks = migrateStockArray(remote.instocks);
-          remote.usstocks = migrateStockArray(remote.usstocks);
-          DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB)); renderAll();
+        if(remote && remote.updatedAt){
+          lastKnownRemoteUpdatedAt = remote.updatedAt;
+          if(remote.updatedAt > (DB.updatedAt||0)){
+            remote.instocks = migrateStockArray(remote.instocks);
+            remote.usstocks = migrateStockArray(remote.usstocks);
+            DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB)); renderAll();
+            const banner = document.getElementById('cloudConflictBanner'); if(banner) banner.remove();
+          }
         }
       });
     } else {
@@ -356,7 +362,7 @@ if(SYNC_ENABLED){
 function pushToCloud(){
   if(!SYNC_ENABLED || !fsDoc || !cloudSyncSettled) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(()=>{ fsDoc.set(DB).catch(()=>{}); dailyBackupIfNeeded(); }, 600);
+  pushTimer = setTimeout(()=>{ safePushToCloud(); }, 600);
 }
 let lastBackupDate = null;
 function dailyBackupIfNeeded(){
@@ -367,24 +373,41 @@ function dailyBackupIfNeeded(){
   if(lastBackupDate === today) return;
   lastBackupDate = today;
   try{
-    firebase.firestore().collection('portfolios').doc(currentUser.uid).collection('backups').doc(today).set(DB).catch(()=>{});
+    firestoreDb.collection('portfolios').doc(currentUser.uid).collection('backups').doc(today).set(DB).catch(()=>{});
   }catch(e){}
 }
-async function forcePushToCloud(){
-  // manual, immediate, no-debounce push — bypasses the automatic timer entirely so you
-  // can push right now on demand, regardless of the automatic sync's current state
+
+/* Every cloud write goes through this. It never blindly overwrites: it reads the server's
+   current copy inside a transaction first, and refuses to write if the server has something
+   newer than what this session last confirmed (e.g. another tab, another device, or a stale
+   idle tab waking up and trying to push an old snapshot). This is what a plain fsDoc.set(DB)
+   cannot guarantee, and its absence was the root cause of more than one data-loss incident. */
+async function safePushToCloud(force){
   if(!SYNC_ENABLED || !fsDoc) return {ok:false, reason:'Cloud sync isn\'t set up on this device.'};
-  clearTimeout(pushTimer);
   DB.updatedAt = Date.now();
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  const snapshotToPush = DB;
   try{
-    await fsDoc.set(DB);
-    cloudSyncSettled = true;
+    await firestoreDb.runTransaction(async tx=>{
+      const snap = await tx.get(fsDoc);
+      const remote = snap.exists ? snap.data() : null;
+      const remoteUpdatedAt = remote ? (remote.updatedAt||0) : 0;
+      if(!force && remote && remoteUpdatedAt > lastKnownRemoteUpdatedAt){
+        const err = new Error('conflict'); err.isConflict = true; err.remote = remote;
+        throw err;
+      }
+      tx.set(fsDoc, snapshotToPush);
+    });
+    lastKnownRemoteUpdatedAt = snapshotToPush.updatedAt;
     dailyBackupIfNeeded();
     return {ok:true};
   }catch(e){
+    if(e && e.isConflict) return {ok:false, conflict:true, remote:e.remote};
     return {ok:false, reason:e.message||'Could not reach the cloud right now.'};
   }
+}
+async function forcePushToCloud(force){
+  return safePushToCloud(force);
 }
 
 /* ---------------- manual full backup (JSON) ---------------- */
@@ -1456,13 +1479,20 @@ function renderEntryPage(){
       if(!ok) return;
       const btn = document.getElementById('pushCloudBtn');
       btn.textContent = 'Pushing…'; btn.disabled = true;
-      const result = await forcePushToCloud();
+      let result = await forcePushToCloud(false);
+      if(result.conflict){
+        btn.textContent = 'Push to Cloud Now'; btn.disabled = false;
+        const proceed = await confirmModal('The cloud has changes made after this device last synced — likely from another tab or device. Overwriting now will permanently discard those cloud changes. Reload this page first if you want to see them before deciding. Overwrite anyway?');
+        if(!proceed) return;
+        btn.textContent = 'Pushing…'; btn.disabled = true;
+        result = await forcePushToCloud(true);
+      }
       btn.textContent = 'Push to Cloud Now'; btn.disabled = false;
       const fb = document.getElementById('entryFeedback');
       if(fb){
         fb.style.display = 'block';
         if(result.ok){ fb.style.background='#34D39922'; fb.style.color='var(--green)'; fb.textContent = 'Pushed to cloud successfully.'; }
-        else { fb.style.background='#F8717122'; fb.style.color='var(--red)'; fb.textContent = 'Push failed: '+result.reason; }
+        else { fb.style.background='#F8717122'; fb.style.color='var(--red)'; fb.textContent = 'Push failed: '+(result.reason||'unknown error'); }
       }
     });
   }
