@@ -281,7 +281,7 @@ const FIREBASE_CONFIG = {
   appId: "1:548121507754:web:0d287b8ce347db9a29ddd3"
 };
 const SYNC_ENABLED = FIREBASE_CONFIG.apiKey !== "PASTE_YOUR_API_KEY";
-let currentUser = null, fsDoc = null, pushTimer = null, firestoreDb = null;
+let currentUser = null, fsDoc = null, firestoreDb = null;
 let cloudSyncSettled = !SYNC_ENABLED; // gate: no cloud push is allowed until we've established the authoritative starting state (prevents an early auto-save from overwriting real cloud data with a stale/incomplete local copy)
 let lastKnownRemoteUpdatedAt = 0; // the newest server updatedAt we've actually confirmed — used to detect "someone/something else wrote since I last synced" before ever overwriting the cloud
 
@@ -312,7 +312,7 @@ if(SYNC_ENABLED){
       document.getElementById('shell').style.display='flex';
       fsDoc = firestoreDb.collection('portfolios').doc(user.uid);
       const foot = document.getElementById('sbFoot');
-      if(foot) foot.innerHTML = `Synced · ${user.email}<br><a href="#" id="signOutLink" style="color:#3ED9A0;">Sign out</a>`;
+      if(foot) foot.innerHTML = `Checking sync…<br><a href="#" id="signOutLink" style="color:#3ED9A0;">Sign out</a>`;
       fsDoc.get().then(snap=>{
         if(snap.exists){
           const remote = snap.data();
@@ -321,13 +321,19 @@ if(SYNC_ENABLED){
             remote.instocks = migrateStockArray(remote.instocks);
             remote.usstocks = migrateStockArray(remote.usstocks);
             DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB));
-            cloudSyncSettled = true;
+            lastPushedUpdatedAt = remote.updatedAt||0;
+          } else {
+            // local is newer than cloud — we do NOT auto-push; the indicator will show
+            // "unsynced changes" so you know to press "Push to Cloud Now" yourself
+            lastPushedUpdatedAt = remote.updatedAt||0;
           }
-          else { cloudSyncSettled = true; pushToCloud(); }
         } else {
-          cloudSyncSettled = true;
-          pushToCloud(); // first login on this account: upload whatever is local
+          // brand new account, nothing in the cloud yet — nothing to pull, and we don't
+          // auto-push either; the sync indicator will show you have unsynced local data
+          lastPushedUpdatedAt = 0;
         }
+        cloudSyncSettled = true;
+        updateSyncIndicator();
         renderAll();
         setTimeout(()=>{ const link=document.getElementById('signOutLink'); if(link) link.addEventListener('click', e=>{ e.preventDefault(); auth.signOut(); location.reload(); }); }, 0);
       }).catch(()=>{
@@ -344,7 +350,8 @@ if(SYNC_ENABLED){
             remote.instocks = migrateStockArray(remote.instocks);
             remote.usstocks = migrateStockArray(remote.usstocks);
             DB = remote; localStorage.setItem(DB_KEY, JSON.stringify(DB)); renderAll();
-            const banner = document.getElementById('cloudConflictBanner'); if(banner) banner.remove();
+            lastPushedUpdatedAt = remote.updatedAt;
+            updateSyncIndicator();
           }
         }
       });
@@ -359,11 +366,11 @@ if(SYNC_ENABLED){
   document.getElementById('shell').style.display='flex';
 }
 
-function pushToCloud(){
-  if(!SYNC_ENABLED || !fsDoc || !cloudSyncSettled) return;
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(()=>{ safePushToCloud(); }, 600);
-}
+/* Cloud pushes happen ONLY via forcePushToCloud() — triggered only by the "Push to Cloud
+   Now" button. There is no automatic background push anywhere in this app anymore. This
+   is deliberate: an automatic push was the root cause of repeated data loss from stale/idle
+   sessions overwriting newer cloud data. Local storage on this device still saves instantly
+   and safely on every change — only the cloud is now a fully manual, explicit action. */
 let lastBackupDate = null;
 function dailyBackupIfNeeded(){
   // maintains a rolling once-per-day snapshot in a separate Firestore subcollection,
@@ -377,11 +384,10 @@ function dailyBackupIfNeeded(){
   }catch(e){}
 }
 
-/* Every cloud write goes through this. It never blindly overwrites: it reads the server's
-   current copy inside a transaction first, and refuses to write if the server has something
-   newer than what this session last confirmed (e.g. another tab, another device, or a stale
-   idle tab waking up and trying to push an old snapshot). This is what a plain fsDoc.set(DB)
-   cannot guarantee, and its absence was the root cause of more than one data-loss incident. */
+/* Even manual pushes never blindly overwrite: this reads the server's current copy inside a
+   transaction first, and refuses to write if the server has something newer than what this
+   session last confirmed (e.g. pushed from another tab or device). Pass force=true only after
+   the person has been shown that conflict and explicitly chosen to overwrite anyway. */
 async function safePushToCloud(force){
   if(!SYNC_ENABLED || !fsDoc) return {ok:false, reason:'Cloud sync isn\'t set up on this device.'};
   DB.updatedAt = Date.now();
@@ -399,7 +405,9 @@ async function safePushToCloud(force){
       tx.set(fsDoc, snapshotToPush);
     });
     lastKnownRemoteUpdatedAt = snapshotToPush.updatedAt;
+    lastPushedUpdatedAt = snapshotToPush.updatedAt;
     dailyBackupIfNeeded();
+    updateSyncIndicator();
     return {ok:true};
   }catch(e){
     if(e && e.isConflict) return {ok:false, conflict:true, remote:e.remote};
@@ -408,6 +416,24 @@ async function safePushToCloud(force){
 }
 async function forcePushToCloud(force){
   return safePushToCloud(force);
+}
+
+/* Sidebar footer indicator: makes it obvious at a glance whether this device's changes
+   have actually reached the cloud yet, since pushing is no longer automatic. */
+let lastPushedUpdatedAt = 0;
+function updateSyncIndicator(){
+  if(!SYNC_ENABLED || !currentUser) return;
+  const foot = document.getElementById('sbFoot');
+  if(!foot) return;
+  const hasUnpushed = (DB.updatedAt||0) > lastPushedUpdatedAt;
+  const signOutHtml = `<br><a href="#" id="signOutLink" style="color:#3ED9A0;">Sign out</a>`;
+  if(hasUnpushed){
+    foot.innerHTML = `<span style="color:#E0A83E;">● Unsynced changes</span> · ${currentUser.email}${signOutHtml}`;
+  } else {
+    foot.innerHTML = `<span style="color:#34D399;">● Synced</span> · ${currentUser.email}${signOutHtml}`;
+  }
+  const link = document.getElementById('signOutLink');
+  if(link) link.addEventListener('click', e=>{ e.preventDefault(); firebase.auth().signOut(); location.reload(); });
 }
 
 /* ---------------- manual full backup (JSON) ---------------- */
@@ -464,7 +490,12 @@ function loadDB(){
 function saveDB(){
   DB.updatedAt = Date.now();
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
-  pushToCloud();
+  updateSyncIndicator();
+  // NOTE: this intentionally does NOT push to the cloud automatically. Cloud updates
+  // happen only when you click "Push to Cloud Now" — see forcePushToCloud(). This is
+  // deliberate: automatic background pushes were the root cause of repeated data loss
+  // from stale/idle sessions overwriting newer cloud data. Local storage on this device
+  // is always saved instantly and safely; the cloud only changes when you say so.
 }
 let DB = loadDB();
 
