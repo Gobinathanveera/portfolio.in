@@ -88,6 +88,18 @@ input,select{font-family:inherit;}
 .sb-item.active .dot{width:6px;height:6px;border-radius:50%;background:var(--accent,var(--mint));margin-left:auto;flex-shrink:0;}
 .sidebar.collapsed .sb-item span:not(.ic){display:none;}
 .sidebar.collapsed .sb-item{justify-content:center;}
+/* expandable "Investment Dashboard" nav group */
+.sb-group-head{display:flex;align-items:center;gap:2px;}
+.sb-group-head .sb-item{flex:1;min-width:0;}
+.sb-chev{background:none;border:none;color:var(--ink-dim);width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sb-chev:hover{background:#ffffff10;color:var(--ink);}
+.sb-chev svg{transition:transform .15s;}
+.sb-chev.open svg{transform:rotate(90deg);}
+.sb-sub{margin:2px 0 4px 18px;padding-left:8px;border-left:1px solid var(--border-soft);display:flex;flex-direction:column;gap:2px;}
+.sb-sub.closed{display:none;}
+.sidebar.collapsed .sb-chev{display:none;}
+.sidebar.collapsed .sb-sub{margin-left:0;padding-left:0;border-left:none;}
+.sidebar.collapsed .sb-sub.closed{display:flex;} /* icon-only rail always shows every icon */
 .sb-foot{padding:14px 18px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;}
 .sidebar.collapsed .sb-foot{opacity:0;}
 
@@ -247,7 +259,7 @@ tbody td.name{font-family:'Inter',sans-serif;font-weight:500;}
    ============================================================ */
 
 const PAGES = [
-  {id:'dashboard', label:'Dashboard', theme:'dashboard', bg:'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=1600&auto=format&fit=crop', icon:'grid'},
+  {id:'dashboard', label:'Investment Dashboard', theme:'dashboard', bg:'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=1600&auto=format&fit=crop', icon:'grid'},
   {id:'instocks',  label:'Indian Stocks & ETFs', theme:'instocks', bg:'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=1600&auto=format&fit=crop', icon:'trend'},
   {id:'usstocks',  label:'US Stocks & ETFs', theme:'usstocks', bg:'https://images.unsplash.com/photo-1591696205602-2f950c417cb9?q=80&w=1600&auto=format&fit=crop', icon:'globe'},
   {id:'mf',        label:'Mutual Funds', theme:'mf', bg:'https://images.unsplash.com/photo-1579532537598-459ecdaf39cc?q=80&w=1600&auto=format&fit=crop', icon:'layers'},
@@ -708,13 +720,42 @@ const sbNav = document.getElementById('sbNav');
 const mainEl = document.getElementById('main');
 let currentView = 'dashboard';
 
-function buildSidebar(){
-  sbNav.innerHTML = PAGES.map(p=>`
-    <div class="sb-item ${p.id===currentView?'active':''}" data-nav="${p.id}" style="--accent:var(--${p.theme==='dashboard'?'mint':(p.theme==='instocks'?'mint':p.theme==='usstocks'?'blue':p.theme==='mf'?'gold':p.theme==='post'?'brick':p.theme==='entry'?'blue':'amber')})">
+let sidebarGroupOpen = false; // starts collapsed on every page load: only "Investment Dashboard" shows until expanded
+function accentFor(p){
+  return p.theme==='dashboard'||p.theme==='instocks' ? 'mint'
+       : p.theme==='usstocks'||p.theme==='entry' ? 'blue'
+       : p.theme==='mf' ? 'gold'
+       : p.theme==='post' ? 'brick' : 'amber';
+}
+function sidebarItemHtml(p){
+  return `
+    <div class="sb-item ${p.id===currentView?'active':''}" data-nav="${p.id}" title="${p.label}" style="--accent:var(--${accentFor(p)})">
       <span class="ic">${ICONS[p.icon]}</span><span>${p.label}</span><span class="dot"></span>
-    </div>`).join('');
+    </div>`;
+}
+function buildSidebar(){
+  const head = PAGES.find(p=>p.id==='dashboard');
+  const subs = PAGES.filter(p=>p.id!=='dashboard');
+  sbNav.innerHTML = `
+    <div class="sb-group-head">
+      ${sidebarItemHtml(head)}
+      <button class="sb-chev ${sidebarGroupOpen?'open':''}" id="sbGroupToggle" type="button" title="${sidebarGroupOpen?'Collapse':'Expand'} all tabs">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="sb-sub ${sidebarGroupOpen?'':'closed'}" id="sbSub">
+      ${subs.map(sidebarItemHtml).join('')}
+    </div>`;
   sbNav.querySelectorAll('.sb-item').forEach(el=>{
-    el.addEventListener('click', ()=>{ currentView = el.dataset.nav; renderAll(); });
+    el.addEventListener('click', ()=>{
+      currentView = el.dataset.nav;
+      if(currentView==='dashboard') sidebarGroupOpen = true; // clicking the header itself also opens the group
+      renderAll();
+    });
+  });
+  document.getElementById('sbGroupToggle').addEventListener('click', ()=>{
+    sidebarGroupOpen = !sidebarGroupOpen;
+    buildSidebar(); // sidebar only — don't re-render the page underneath
   });
 }
 
@@ -885,7 +926,7 @@ function renderDashboard(){
     <div class="page-head">
       <div>
         <div class="page-eyebrow">Overview</div>
-        <div class="page-title">Your Portfolio</div>
+        <div class="page-title">Investment Dashboard</div>
         <div class="page-sub">Every instrument, one screen. Updated ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}.</div>
       </div>
     </div>
