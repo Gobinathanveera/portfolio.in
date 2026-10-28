@@ -100,6 +100,20 @@ input,select{font-family:inherit;}
 .sidebar.collapsed .sb-chev{display:none;}
 .sidebar.collapsed .sb-sub{margin-left:0;padding-left:0;border-left:none;}
 .sidebar.collapsed .sb-sub.closed{display:flex;} /* icon-only rail always shows every icon */
+.sb-group{margin-bottom:6px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+@media(max-width:900px){.two-col{grid-template-columns:1fr;}}
+.pbar{height:8px;border-radius:999px;background:#ffffff14;overflow:hidden;margin:6px 0 4px;}
+.pbar>i{display:block;height:100%;border-radius:999px;background:var(--accent,var(--mint));}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #ffffff0a;font-size:12.5px;}
+.kv b{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+.dot-c{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;}
+tr.total-row td{border-top:1px solid var(--border-soft);font-weight:600;}
+.badge.ok{background:#34D39922;color:var(--green);}
+.badge.warn{background:#E0A83E22;color:var(--amber);}
+.badge.bad{background:#F8717122;color:var(--red);}
+.badge.dim{background:#ffffff10;color:var(--ink-faint);}
+.view[data-theme="debtdash"],.view[data-theme="mydebts"],.view[data-theme="strategy"],.view[data-theme="debtentry"]{--accent:var(--red);}
 .sb-foot{padding:14px 18px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;}
 .sidebar.collapsed .sb-foot{opacity:0;}
 
@@ -267,6 +281,10 @@ const PAGES = [
   {id:'epf',       label:'EPF', theme:'epf', bg:'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=1600&auto=format&fit=crop', icon:'briefcase'},
   {id:'post',      label:'Post Office Schemes', theme:'post', bg:'https://images.unsplash.com/photo-1579208030886-b937da0925dc?q=80&w=1600&auto=format&fit=crop', icon:'mail'},
   {id:'entry',     label:'Add Entry', theme:'entry', bg:'https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1600&auto=format&fit=crop', icon:'plus'},
+  {id:'debtdash',  group:'debt', label:'DEBT Dashboard',     theme:'debtdash',  bg:'', icon:'card'},
+  {id:'mydebts',   group:'debt', label:'My Debts',           theme:'mydebts',   bg:'', icon:'list'},
+  {id:'strategy',  group:'debt', label:'Repayment Strategy', theme:'strategy',  bg:'', icon:'compare'},
+  {id:'debtentry', group:'debt', label:'Debt Entry',         theme:'debtentry', bg:'', icon:'plus'},
 ];
 
 const ICONS = {
@@ -277,6 +295,9 @@ const ICONS = {
   shield:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 5-3 7.5-7 9-4-1.5-7-4-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   briefcase:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.8"/></svg>',
   mail:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  card:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M7 15h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  list:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 6h13M8 12h13M8 18h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="6" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="18" r="1.2" fill="currentColor"/></svg>',
+  compare:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 4v16M17 4v16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 8l4-4 4 4M13 16l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   plus:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 };
 
@@ -720,8 +741,10 @@ const sbNav = document.getElementById('sbNav');
 const mainEl = document.getElementById('main');
 let currentView = 'dashboard';
 
-let sidebarGroupOpen = false; // starts collapsed on every page load: only "Investment Dashboard" shows until expanded
+let sidebarGroupOpen = {invest:false, debt:false}; // both start collapsed on every page load
+const NAV_GROUPS = [ {key:'invest', head:'dashboard'}, {key:'debt', head:'debtdash'} ];
 function accentFor(p){
+  if(p.group==='debt') return 'red';
   return p.theme==='dashboard'||p.theme==='instocks' ? 'mint'
        : p.theme==='usstocks'||p.theme==='entry' ? 'blue'
        : p.theme==='mf' ? 'gold'
@@ -734,28 +757,37 @@ function sidebarItemHtml(p){
     </div>`;
 }
 function buildSidebar(){
-  const head = PAGES.find(p=>p.id==='dashboard');
-  const subs = PAGES.filter(p=>p.id!=='dashboard');
-  sbNav.innerHTML = `
-    <div class="sb-group-head">
-      ${sidebarItemHtml(head)}
-      <button class="sb-chev ${sidebarGroupOpen?'open':''}" id="sbGroupToggle" type="button" title="${sidebarGroupOpen?'Collapse':'Expand'} all tabs">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-    </div>
-    <div class="sb-sub ${sidebarGroupOpen?'':'closed'}" id="sbSub">
-      ${subs.map(sidebarItemHtml).join('')}
+  sbNav.innerHTML = NAV_GROUPS.map(g=>{
+    const head = PAGES.find(p=>p.id===g.head);
+    const subs = PAGES.filter(p=>(p.group||'invest')===g.key && p.id!==g.head);
+    const open = sidebarGroupOpen[g.key];
+    return `
+    <div class="sb-group" data-group="${g.key}">
+      <div class="sb-group-head">
+        ${sidebarItemHtml(head)}
+        <button class="sb-chev ${open?'open':''}" data-gtoggle="${g.key}" type="button" title="${open?'Collapse':'Expand'} all tabs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="sb-sub ${open?'':'closed'}" data-gsub="${g.key}">
+        ${subs.map(sidebarItemHtml).join('')}
+      </div>
     </div>`;
+  }).join('');
   sbNav.querySelectorAll('.sb-item').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentView = el.dataset.nav;
-      if(currentView==='dashboard') sidebarGroupOpen = true; // clicking the header itself also opens the group
+      const g = NAV_GROUPS.find(x=>x.head===currentView);
+      if(g) sidebarGroupOpen[g.key] = true;   // clicking a group's header also opens that group
       renderAll();
     });
   });
-  document.getElementById('sbGroupToggle').addEventListener('click', ()=>{
-    sidebarGroupOpen = !sidebarGroupOpen;
-    buildSidebar(); // sidebar only — don't re-render the page underneath
+  sbNav.querySelectorAll('[data-gtoggle]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const k = btn.dataset.gtoggle;
+      sidebarGroupOpen[k] = !sidebarGroupOpen[k];
+      buildSidebar();   // sidebar only — don't re-render the page underneath
+    });
   });
 }
 
@@ -766,7 +798,7 @@ document.getElementById('sbToggle').addEventListener('click', ()=>{
 function pageShell(page, innerHtml, ticker){
   return `
   <div class="view active" data-theme="${page.theme}">
-    <div class="bg-photo" style="background-image:url('${page.bg}')"></div>
+    <div class="bg-photo" style="${page.bg ? `background-image:url('${page.bg}')` : 'opacity:1;background-image:radial-gradient(900px 420px at 85% -10%, #F8717114, transparent 60%), radial-gradient(700px 380px at 0% 0%, #4C8DFF10, transparent 55%)'}"></div>
     <div class="bg-fade"></div>
     ${ticker?ticker:''}
     <div class="content">${innerHtml}</div>
@@ -1581,7 +1613,8 @@ function renderEntryPage(){
         instocks: migrateStockArray(parsed.instocks||[]),
         usstocks: migrateStockArray(parsed.usstocks||[]),
         mf: parsed.mf||[], ppf: parsed.ppf||[], epf: parsed.epf||[], post: parsed.post||[],
-        priceCache: parsed.priceCache||{}
+        priceCache: parsed.priceCache||{},
+        debt: parsed.debt || DB.debt
       };
       saveDB();
       renderAll();
@@ -1762,6 +1795,824 @@ function allEntriesFlat(){
   return out;
 }
 
+/* ================= DEBT MODULE — engine =================
+   Everything debt-related lives under DB.debt (one self-contained namespace).
+   Nothing in this module writes any investment key, and no investment code touches DB.debt.
+   The only investment access is one READ-ONLY call to allHoldingsFlat() for net worth. */
+
+const DEBT_EPS = 0.005;
+const DEBT_COLORS = ['#F87171','#FB923C','#FBBF24','#34D399','#4C8DFF','#A78BFA','#F472B6','#22D3EE','#94A3B8'];
+const DEBT_CATEGORIES = {gold:'Gold loan', loan:'Loan', friend:'Friend / family', card:'Credit card', other:'Other'};
+function dClamp01(x){ return Math.max(0, Math.min(1, x)); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---- month helpers (all "YYYY-MM") ---- */
+function ymNow(){ return todayStr().slice(0,7); }
+function addMonthsYM(ym, n){
+  const [y,m] = ym.split('-').map(Number);
+  const t = y*12 + (m-1) + n;
+  return `${Math.floor(t/12)}-${String(t%12+1).padStart(2,'0')}`;
+}
+function lastDayOfYM(ym){
+  const [y,m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10);
+}
+function ymLabel(ym){
+  const [y,m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m-1, 1)).toLocaleString('en-US',{month:'short', year:'2-digit', timeZone:'UTC'});
+}
+function diffMD(fromStr, toStr){
+  const f = new Date(fromStr+'T00:00:00Z'), t = new Date(toStr+'T00:00:00Z');
+  let months = (t.getUTCFullYear()-f.getUTCFullYear())*12 + (t.getUTCMonth()-f.getUTCMonth());
+  let anchor = new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth()+months, f.getUTCDate()));
+  if(anchor > t){ months--; anchor = new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth()+months, f.getUTCDate())); }
+  if(months < 0) months = 0;
+  return { months, days: Math.max(0, Math.round((t-anchor)/86400000)), totalDays: Math.max(0, Math.round((t-f)/86400000)) };
+}
+
+/* ---- state ---- */
+function seedDebtState(){
+  const y = new Date().getFullYear();
+  const today = todayStr();
+  const base = { priorPaid:0, monthlyPayment:null, schedule:[], startDate:today };
+  return {
+    seeded: true,
+    debts: [
+      {...base, id:'d_muthoot',    name:'Gold – Muthoot Finance', category:'gold',   openingBalance:224000, rate:0.87, ratePeriod:'month'},
+      {...base, id:'d_iob',        name:'Gold – IOB',             category:'gold',   openingBalance:100000, rate:8.5,  ratePeriod:'year'},
+      {...base, id:'d_society',    name:'Gold – Society',         category:'gold',   openingBalance:33000,  rate:8,    ratePeriod:'year'},
+      {...base, id:'d_loan',       name:'Loan',                   category:'loan',   openingBalance:12442,  rate:0,    ratePeriod:'year',
+        schedule:[{month:`${y}-10`, amount:5500},{month:`${y}-11`, amount:5500},{month:`${y}-12`, amount:1442}]},
+      {...base, id:'d_purus',      name:'Friend 1 (Purus)',       category:'friend', openingBalance:70000,  priorPaid:20000, rate:0, ratePeriod:'year', monthlyPayment:10000},
+      {...base, id:'d_rathinavel', name:'Friend 2 (Rathinavel)',  category:'friend', openingBalance:25000,  rate:0,    ratePeriod:'year'},
+    ],
+    payments: [], assets: [], snapshots: [],
+    settings: { monthlyBudget:null, plan:'recommended' }
+  };
+}
+function getDebt(){
+  if(!DB.debt || !Array.isArray(DB.debt.debts)) DB.debt = seedDebtState();
+  const D = DB.debt;
+  if(!Array.isArray(D.payments)) D.payments = [];
+  if(!Array.isArray(D.assets)) D.assets = [];
+  if(!Array.isArray(D.snapshots)) D.snapshots = [];
+  if(!D.settings) D.settings = { monthlyBudget:null, plan:'recommended' };
+  return D;
+}
+
+/* ---- per-debt maths ---- */
+function monthlyRateOf(d){ const r=(+d.rate||0)/100; return d.ratePeriod==='month' ? r : r/12; }
+function annualRateOf(d){ const r=(+d.rate||0); return d.ratePeriod==='month' ? r*12 : r; }
+
+// interest accrued day by day from the tracking start date, replaying principal payments
+function accruedInterest(d, principalPayments, asOf){
+  const annual = annualRateOf(d)/100;
+  if(annual <= 0) return 0;
+  let bal = Math.max(0, (+d.openingBalance||0) - (+d.priorPaid||0));
+  const start = d.startDate || asOf;
+  if(start >= asOf) return 0;
+  let cursor = start, acc = 0;
+  for(const p of principalPayments){
+    let pd = p.date; if(pd < cursor) pd = cursor; if(pd > asOf) pd = asOf;
+    acc += bal*annual/365*daysBetween(cursor, pd);
+    bal = Math.max(0, bal - p.amount);
+    cursor = pd;
+  }
+  acc += bal*annual/365*daysBetween(cursor, asOf);
+  return acc;
+}
+function debtState(d, payments, asOf){
+  asOf = asOf || todayStr();
+  const mine = payments.filter(p=>p.debtId===d.id && p.date<=asOf).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  const principal = mine.filter(p=>p.type!=='interest');
+  const principalPaid = principal.reduce((s,p)=>s+(+p.amount||0),0);
+  const interestPaid = mine.filter(p=>p.type==='interest').reduce((s,p)=>s+(+p.amount||0),0);
+  const opening = +d.openingBalance||0, prior = +d.priorPaid||0;
+  const startBalance = Math.max(0, opening - prior);
+  const balance = Math.max(0, startBalance - principalPaid);
+  const accrued = accruedInterest(d, principal, asOf);
+  const interestDue = Math.max(0, accrued - interestPaid);
+  const repaid = Math.min(opening, prior + principalPaid);
+  const progress = balance <= DEBT_EPS ? 100 : (opening>0 ? Math.min(100, repaid/opening*100) : 0);
+  return { balance, principalPaid, interestPaid, accrued, interestDue, progress, opening, repaid, startBalance };
+}
+// the minimum due in calendar month `ym` (works on a debt record or a simulation item)
+function debtMinPayment(d, ym, monthInterest){
+  if(Array.isArray(d.schedule) && d.schedule.length){
+    const s = d.schedule.find(x=>x.month===ym);
+    return s ? (+s.amount||0) : 0;
+  }
+  if(+d.monthlyPayment > 0) return +d.monthlyPayment;
+  return monthInterest > 0 ? monthInterest : 0;   // gold loans: interest-only; interest-free: nothing
+}
+
+/* ---- Snowball / Avalanche simulation (pure: no DB access, so it can be tested in isolation) ---- */
+function strategyOrder(list, strategy){
+  const arr = [...list];
+  if(strategy === 'snowball') arr.sort((a,b)=> (a.bal-b.bal) || (b.annualRate-a.annualRate));
+  else arr.sort((a,b)=> (b.annualRate-a.annualRate) || (a.bal-b.bal));
+  return arr;
+}
+function simulatePlan(debtsIn, opts){
+  const strategy = opts.strategy === 'snowball' ? 'snowball' : 'avalanche';
+  const maxM = opts.maxMonths || 600;
+  const ds = debtsIn.filter(d=>d.balance > DEBT_EPS).map(d=>({
+    id:d.id, name:d.name, bal:d.balance, monthlyRate:d.monthlyRate, annualRate:d.annualRate,
+    monthlyPayment:d.monthlyPayment, schedule:d.schedule, paidThisMonth:d.paidThisMonth||0,
+    interestIncurred:0, paid:0, closedYM:null
+  }));
+  let ym = opts.startYM;
+  const startTotal = ds.reduce((s,d)=>s+d.bal,0);
+  const mins0 = ds.reduce((s,d)=>s+debtMinPayment(d, ym, d.bal*d.monthlyRate),0);
+  const baseBudget = (opts.budget!=null && opts.budget>0) ? opts.budget : mins0;
+  const timeline = [];
+  let totalInterest = 0, totalPaid = 0;
+  for(let m=0; m<maxM; m++){
+    const active = ds.filter(d=>d.bal > DEBT_EPS);
+    if(!active.length) break;
+    let monthInterest = 0;
+    active.forEach(d=>{ d._i = d.bal*d.monthlyRate; d.bal += d._i; d.interestIncurred += d._i; monthInterest += d._i; });
+    const pay = {}, mins = {};
+    let minsSum = 0;
+    active.forEach(d=>{
+      let min = debtMinPayment(d, ym, d._i);
+      if(m === 0) min = Math.max(0, min - d.paidThisMonth);
+      min = Math.min(min, d.bal);
+      pay[d.id] = min; mins[d.id] = min; minsSum += min;
+    });
+    let budget = baseBudget;
+    if(m === 0) budget = Math.max(0, baseBudget - (opts.paidThisMonthTotal||0));
+    let extra = Math.max(0, budget - minsSum);        // if the budget is below the minimums, the minimums are still paid
+    for(const d of strategyOrder(active, strategy)){
+      if(extra <= DEBT_EPS) break;
+      const room = d.bal - pay[d.id];
+      if(room <= DEBT_EPS) continue;
+      const add = Math.min(extra, room);
+      pay[d.id] += add; extra -= add;
+    }
+    let paidMonth = 0;
+    active.forEach(d=>{
+      d.bal -= pay[d.id]; d.paid += pay[d.id]; paidMonth += pay[d.id];
+      if(d.bal <= DEBT_EPS){ d.bal = 0; d.closedYM = ym; }
+    });
+    totalInterest += monthInterest; totalPaid += paidMonth;
+    timeline.push({ ym, interest:monthInterest, paid:paidMonth, balance:ds.reduce((s,d)=>s+d.bal,0), pay:{...pay}, mins:{...mins} });
+    ym = addMonthsYM(ym, 1);
+  }
+  const open = ds.filter(d=>d.bal > DEBT_EPS);
+  const closures = ds.filter(d=>d.closedYM).map(d=>({id:d.id, name:d.name, ym:d.closedYM}))
+                     .sort((a,b)=>a.ym<b.ym?-1:a.ym>b.ym?1:0);
+  const closureById = {}; closures.forEach(c=>{ closureById[c.id] = c.ym; });
+  const endYM = closures.length ? closures[closures.length-1].ym : null;
+  return {
+    strategy, debtFree: open.length===0, months: timeline.length, endYM,
+    endDate: endYM ? lastDayOfYM(endYM) : null,
+    totalInterest, totalPaid, timeline, closures, closureById, startTotal,
+    baseBudget, minsAtStart: mins0, remaining: open.reduce((s,d)=>s+d.bal,0),
+    names: Object.fromEntries(ds.map(d=>[d.id, d.name]))
+  };
+}
+function recommendStrategy(sn, av){
+  const diff = sn.totalInterest - av.totalInterest;      // > 0 means Avalanche is cheaper
+  const monthsDiff = sn.months - av.months;
+  let pick, reason;
+  if(av.debtFree && !sn.debtFree){
+    pick = 'avalanche'; reason = 'Only Avalanche clears every debt within 50 years at this monthly amount.';
+  } else if(!av.debtFree && sn.debtFree){
+    pick = 'snowball'; reason = 'Only Snowball clears every debt within 50 years at this monthly amount.';
+  } else if(diff > 100){
+    pick = 'avalanche';
+    reason = `Avalanche pays the highest-interest debt first, so it costs ${fmtINR(diff)} less interest` +
+             (monthsDiff>0 ? ` and finishes ${monthsDiff} month${monthsDiff>1?'s':''} sooner.` : '.');
+  } else if(diff < -100){
+    pick = 'snowball';
+    reason = `Snowball costs ${fmtINR(-diff)} less interest here` + (monthsDiff<0 ? ` and finishes ${-monthsDiff} month${-monthsDiff>1?'s':''} sooner.` : '.');
+  } else {
+    pick = 'snowball';
+    reason = 'Both methods cost almost the same interest, so Snowball is recommended — it clears the smallest debts first for quick wins and fewer payments to track.';
+  }
+  return { pick, reason, interestDiff:diff, monthsDiff };
+}
+
+/* ---- plans for the current state of the debts ---- */
+function debtThisMonthPaid(debtId, ym, today){
+  return getDebt().payments.filter(p=>(!debtId || p.debtId===debtId) && p.date.slice(0,7)===ym && p.date<=today)
+                           .reduce((s,p)=>s+(+p.amount||0),0);
+}
+function debtPlanInputs(){
+  const D = getDebt(), today = todayStr(), ym = today.slice(0,7);
+  return D.debts.map(d=>{
+    const st = debtState(d, D.payments, today);
+    return { id:d.id, name:d.name, balance:st.balance, monthlyRate:monthlyRateOf(d), annualRate:annualRateOf(d),
+             monthlyPayment:+d.monthlyPayment||0, schedule:d.schedule||[], paidThisMonth:debtThisMonthPaid(d.id, ym, today) };
+  }).filter(x=>x.balance > DEBT_EPS);
+}
+function computePlans(){
+  const D = getDebt(), ym = ymNow();
+  const inputs = debtPlanInputs();
+  const budget = (+D.settings.monthlyBudget > 0) ? +D.settings.monthlyBudget : null;
+  const opts = { budget, startYM:ym, paidThisMonthTotal: debtThisMonthPaid(null, ym, todayStr()) };
+  const snowball  = simulatePlan(inputs, {...opts, strategy:'snowball'});
+  const avalanche = simulatePlan(inputs, {...opts, strategy:'avalanche'});
+  const recommended = recommendStrategy(snowball, avalanche);
+  const chosen = D.settings.plan==='snowball' ? 'snowball' : D.settings.plan==='avalanche' ? 'avalanche' : recommended.pick;
+  return { inputs, snowball, avalanche, recommended, activeStrategy:chosen, active: chosen==='snowball'?snowball:avalanche, budgetIsAuto: budget===null };
+}
+function buildDebtRows(plans){
+  const D = getDebt(), today = todayStr(), ym = today.slice(0,7);
+  const rank = {};
+  strategyOrder(plans.inputs.map(i=>({id:i.id, bal:i.balance, annualRate:i.annualRate})), plans.activeStrategy)
+    .forEach((x,i)=>{ rank[x.id] = i+1; });
+  return D.debts.map((d,idx)=>{
+    const st = debtState(d, D.payments, today);
+    const minFull = st.balance > DEBT_EPS ? debtMinPayment(d, ym, st.balance*monthlyRateOf(d)) : 0;
+    const paidMonth = debtThisMonthPaid(d.id, ym, today);
+    let status = 'Active';
+    if(st.balance <= DEBT_EPS) status = 'Closed';
+    else if(minFull > DEBT_EPS) status = paidMonth >= minFull-DEBT_EPS ? 'Paid this month' : 'Due this month';
+    return { d, st, idx, minFull, paidMonth, status,
+             priority: st.balance > DEBT_EPS ? (rank[d.id]||null) : null,
+             closeYM: plans.active.closureById[d.id] || null,
+             color: DEBT_COLORS[idx % DEBT_COLORS.length],
+             interestBearing: annualRateOf(d) > 0 };
+  });
+}
+function debtTotals(rows){
+  const total = rows.reduce((s,r)=>s+r.st.balance,0);
+  const ib = rows.filter(r=>r.interestBearing).reduce((s,r)=>s+r.st.balance,0);
+  const opening = rows.reduce((s,r)=>s+r.st.opening,0);
+  const repaid = rows.reduce((s,r)=>s+r.st.repaid,0);
+  const interestDue = rows.reduce((s,r)=>s+r.st.interestDue,0);
+  const wRate = total>DEBT_EPS ? rows.reduce((s,r)=>s+r.st.balance*annualRateOf(r.d),0)/total : 0;
+  return { total, interestBearing:ib, interestFree:total-ib, opening, repaid, interestDue, weightedRate:wRate,
+           progress: opening>0 ? Math.min(100, repaid/opening*100) : (total<=DEBT_EPS?100:0) };
+}
+// READ-ONLY look at the investment side (current value of everything) plus manually entered assets
+function debtAssets(){
+  const D = getDebt();
+  let invest = 0;
+  try{ invest = allHoldingsFlat().current || 0; }catch(e){ invest = 0; }
+  const other = D.assets.reduce((s,a)=>s+(+a.value||0),0);
+  return { invest, other, total: invest+other };
+}
+function healthScore(t, assets, plan){
+  if(t.total <= DEBT_EPS) return { score:100, rating:'Debt-free', color:'#34D399', factors:[] };
+  const owed = t.total + t.interestDue;
+  const ratio = assets.total>0 ? owed/assets.total : 99;
+  const f1 = 35*dClamp01((1-ratio)/0.9);
+  const f2 = 25*dClamp01(1 - t.weightedRate/18);
+  const f3 = 20*dClamp01(t.progress/100);
+  const f4 = plan.debtFree ? 20*dClamp01((60-plan.months)/54) : 0;
+  const score = Math.round(f1+f2+f3+f4);
+  const rating = score>=80 ? 'Excellent' : score>=65 ? 'Good' : score>=45 ? 'Fair' : 'Needs attention';
+  const color = score>=80 ? '#34D399' : score>=65 ? '#3ED9A0' : score>=45 ? '#FBBF24' : '#F87171';
+  return { score, rating, color, factors:[
+    { label:'Debt vs. assets', pts:f1, max:35, note: assets.total>0 ? `You owe ${(ratio*100).toFixed(1)}% of what you own (investments + other assets).` : 'No assets recorded — add them in Debt Entry.' },
+    { label:'Average interest rate', pts:f2, max:25, note:`Weighted average ${t.weightedRate.toFixed(2)}% p.a. across what you owe (lower is better).` },
+    { label:'Repayment progress', pts:f3, max:20, note:`${t.progress.toFixed(2)}% of the original balances repaid so far.` },
+    { label:'Time to debt-free', pts:f4, max:20, note: plan.debtFree ? `About ${plan.months} month${plan.months===1?'':'s'} at the current plan (6 months or less scores full marks).` : 'Not debt-free within 50 years at this monthly amount.' },
+  ]};
+}
+
+/* ================= DEBT MODULE — pages ================= */
+function dR2(n){ return Math.round(n*100)/100; }
+function dOpt(value, label, sel){ return `<option value="${value}" ${sel?'selected':''}>${label}</option>`; }
+function dPbar(pct){ const p = Math.max(0, Math.min(100, pct)); return `<div class="pbar"><i style="width:${p}%"></i></div>`; }
+function dBadge(status){
+  const cls = status==='Closed' ? 'dim' : status==='Paid this month' ? 'ok' : status==='Due this month' ? 'warn' : '';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+function dRateText(d){
+  const r = +d.rate||0;
+  if(r <= 0) return 'Interest-free';
+  return d.ratePeriod==='month' ? `${r.toFixed(2)}% / month <span class="tag">(${(r*12).toFixed(2)}% p.a.)</span>` : `${r.toFixed(2)}% p.a.`;
+}
+function dStratName(k){ return k==='snowball' ? 'Debt Snowball' : 'Debt Avalanche'; }
+function dLineOpts(fmt){
+  return { plugins:{ legend:{display:true, position:'bottom', labels:{color:'#8B96AC', font:{size:11}, boxWidth:10, padding:12}},
+                     tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${fmt(ctx.raw)}`}} },
+           scales:{ x:{grid:{display:false}, ticks:{color:'#8B96AC', font:{size:10}, maxTicksLimit:12}},
+                    y:{grid:{color:'#ffffff0a'}, ticks:{color:'#8B96AC', font:{size:10}, callback:v=>fmt(v)}} },
+           interaction:{intersect:false, mode:'index'} };
+}
+
+/* ---------------- DEBT DASHBOARD ---------------- */
+function renderDebtDashboard(){
+  const page = PAGES.find(p=>p.id==='debtdash');
+  const plans = computePlans(), rows = buildDebtRows(plans), t = debtTotals(rows);
+  const assets = debtAssets(), act = plans.active, D = getDebt();
+  const owed = t.total + t.interestDue;
+  const netWorth = assets.total - owed;
+  const health = healthScore(t, assets, act);
+  const today = todayStr();
+  const isFree = t.total <= DEBT_EPS;
+  const endDate = isFree ? today : (act.debtFree ? act.endDate : null);
+  let cdMain = 'Not reachable', cdSub = 'Raise the monthly amount on the Repayment Strategy tab';
+  if(endDate){
+    const df = diffMD(today, endDate);
+    cdMain = isFree ? 'Debt-free' : `${df.months} mo ${df.days} d`;
+    cdSub = isFree ? 'Nothing outstanding' : `${df.totalDays} days to go`;
+  }
+  const dueRows = rows.filter(r=>r.status==='Due this month');
+
+  const html = `
+    <div class="page-head">
+      <div>
+        <div class="page-eyebrow">Debt</div>
+        <div class="page-title">DEBT Dashboard</div>
+        <div class="page-sub">Everything you owe, in one place — separate from your investments. Dates assume the ${dStratName(plans.activeStrategy)} plan.</div>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="card"><div class="stat-label">Total Debt</div><div class="stat-value">${fmtINR(t.total)}</div>
+        <div class="stat-delta">${t.interestDue>DEBT_EPS ? '+ '+fmtINR(t.interestDue)+' accrued interest due' : 'No accrued interest due'}</div></div>
+      <div class="card"><div class="stat-label">Total Interest Debt</div><div class="stat-value">${fmtINR(t.interestBearing)}</div>
+        <div class="stat-delta">${t.total>DEBT_EPS ? (t.interestBearing/t.total*100).toFixed(2) : '0.00'}% of total</div></div>
+      <div class="card"><div class="stat-label">Total Interest-Free Debt</div><div class="stat-value">${fmtINR(t.interestFree)}</div>
+        <div class="stat-delta">${t.total>DEBT_EPS ? (t.interestFree/t.total*100).toFixed(2) : '0.00'}% of total</div></div>
+      <div class="card"><div class="stat-label">Debt-Free Progress</div><div class="stat-value">${t.progress.toFixed(2)}%</div>${dPbar(t.progress)}
+        <div class="stat-delta">${fmtINR(t.repaid)} of ${fmtINR(t.opening)} repaid</div></div>
+      <div class="card"><div class="stat-label">Debt-Free Countdown</div><div class="stat-value">${cdMain}</div><div class="stat-delta">${cdSub}</div></div>
+      <div class="card"><div class="stat-label">Expected Debt-Free Date</div><div class="stat-value">${endDate ? fmtDate(endDate) : '—'}</div>
+        <div class="stat-delta">${dStratName(plans.activeStrategy)} · ${fmtINR(act.baseBudget)}/month</div></div>
+      <div class="card"><div class="stat-label">Net Worth</div><div class="stat-value ${netWorth>=0?'up':'down'}">${fmtINR(netWorth)}</div>
+        <div class="stat-delta">Assets ${fmtINR(assets.total)} − debt ${fmtINR(owed)}</div></div>
+      <div class="card"><div class="stat-label">Financial Health Score</div><div class="stat-value" style="color:${health.color}">${health.score}/100</div>
+        <div class="stat-delta">${health.rating}</div></div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Net Worth Tracker</h3>
+        <div class="sub">Recorded snapshots (solid) and the projection as debts are repaid, with assets held constant (dashed).</div>
+        <div class="chart-wrap tall"><canvas id="debtNWChart"></canvas></div>
+        <div style="margin-top:14px;">
+          <div class="kv"><span>Investments (read from Investment Dashboard)</span><b>${fmtINR(assets.invest)}</b></div>
+          <div class="kv"><span>Other assets (added in Debt Entry)</span><b>${fmtINR(assets.other)}</b></div>
+          <div class="kv"><span>Debt incl. accrued interest</span><b>− ${fmtINR(owed)}</b></div>
+          <div class="kv"><span><b>Net worth</b></span><b class="${netWorth>=0?'up':'down'}">${fmtINR(netWorth)}</b></div>
+          <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn" id="recordSnapshotBtn" type="button">Record today's snapshot</button>
+            <span class="tag">${D.snapshots.length} snapshot${D.snapshots.length===1?'':'s'} recorded</span>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>Where your debt sits</h3>
+        <div class="sub">By current balance</div>
+        <div class="chart-wrap tall"><canvas id="debtMixChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-head"><h3>Financial Health Score — ${health.score}/100</h3><span class="badge" style="background:${health.color}22;color:${health.color};">${health.rating}</span></div>
+        ${health.factors.length===0 ? '<div class="empty-state"><b>Debt-free</b>Nothing to score.</div>' :
+          health.factors.map(f=>`
+            <div style="margin-bottom:14px;">
+              <div class="kv" style="border:none;padding-bottom:4px;"><span>${f.label}</span><b>${f.pts.toFixed(1)} / ${f.max}</b></div>
+              ${dPbar(f.pts/f.max*100)}
+              <div class="tag" style="margin-top:4px;display:block;">${f.note}</div>
+            </div>`).join('')}
+        <div class="rate-note">Score out of 100 from four things: debt vs. assets (35), average interest rate (25), repayment progress (20) and time to debt-free (20).</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Due this month</h3></div>
+        ${dueRows.length===0 ? '<div class="empty-state"><b>Nothing due</b>Every minimum payment for this month is covered.</div>' :
+          `<div class="table-scroll"><table><thead><tr><th>Debt</th><th>Still to pay</th></tr></thead><tbody>
+            ${dueRows.map(r=>`<tr><td class="name">${esc(r.d.name)}</td><td>${fmtINR(Math.max(0, r.minFull-r.paidMonth))}</td></tr>`).join('')}
+          </tbody></table></div>`}
+        <div class="rate-note">Gold loans show the monthly interest as the minimum. Log payments in the Debt Entry tab and this list updates by itself.</div>
+      </div>
+    </div>
+  `;
+  mainEl.innerHTML = pageShell(page, html);
+
+  // charts
+  destroyChart('debtMix'); destroyChart('debtNW');
+  const open = rows.filter(r=>r.st.balance > DEBT_EPS);
+  charts.debtMix = new Chart(document.getElementById('debtMixChart'), {
+    type:'doughnut',
+    data:{ labels: open.length ? open.map(r=>r.d.name) : ['No debt'], datasets:[{ data: open.length ? open.map(r=>dR2(r.st.balance)) : [1],
+           backgroundColor: open.length ? open.map(r=>r.color) : ['#1a2233'], borderWidth:0 }]},
+    options:{ plugins:{legend:{position:'bottom', labels:{color:'#8B96AC', font:{size:11}, boxWidth:10, padding:12}},
+                       tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${fmtINR(ctx.raw)}`}}}, cutout:'64%' }
+  });
+  const snaps = [...D.snapshots].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  const labels = [], rec = [], proj = [];
+  snaps.forEach(s=>{ labels.push(fmtDate(s.date)); rec.push(s.netWorth); proj.push(null); });
+  labels.push('Now'); rec.push(dR2(netWorth)); proj.push(dR2(netWorth));
+  act.timeline.slice(0,60).forEach(m=>{ labels.push(ymLabel(m.ym)); rec.push(null); proj.push(dR2(assets.total - m.balance)); });
+  charts.debtNW = new Chart(document.getElementById('debtNWChart'), {
+    type:'line',
+    data:{ labels, datasets:[
+      { label:'Recorded', data:rec, borderColor:'#34D399', backgroundColor:'#34D39922', tension:.3, borderWidth:2.5, pointRadius:4, spanGaps:false },
+      { label:'Projected', data:proj, borderColor:'#4C8DFF', borderDash:[6,5], tension:.3, borderWidth:2, pointRadius:2, spanGaps:false },
+    ]},
+    options: dLineOpts(fmtINR)
+  });
+
+  document.getElementById('recordSnapshotBtn').addEventListener('click', ()=>{
+    const snap = { id:uid(), date:todayStr(), netWorth:dR2(netWorth), assets:dR2(assets.total), debt:dR2(owed) };
+    const i = D.snapshots.findIndex(s=>s.date===snap.date);
+    if(i>=0) D.snapshots[i] = {...snap, id:D.snapshots[i].id}; else D.snapshots.push(snap);
+    saveDB(); renderAll();
+  });
+}
+
+/* ---------------- MY DEBTS ---------------- */
+function dDebtTable(rowsSubset, label){
+  if(!rowsSubset.length) return `<div class="empty-state"><b>No ${label} debts</b>Add one in the Debt Entry tab.</div>`;
+  const sum = f => rowsSubset.reduce((s,r)=>s+f(r),0);
+  return `<div class="table-scroll"><table>
+    <thead><tr><th>Debt Name</th><th>Opening Balance</th><th>Interest Rate</th><th>Monthly Payment</th><th>Current Balance</th><th>Interest Accrued</th><th>Target Closure</th><th>Status</th><th>Priority</th><th>Progress</th></tr></thead>
+    <tbody>
+      ${rowsSubset.map(r=>`<tr>
+        <td class="name"><span class="dot-c" style="background:${r.color}"></span>${esc(r.d.name)}<br><span class="tag">${DEBT_CATEGORIES[r.d.category]||'Other'}</span></td>
+        <td>${fmtINR(r.st.opening)}</td>
+        <td>${dRateText(r.d)}</td>
+        <td>${r.minFull>DEBT_EPS ? fmtINR(r.minFull) : '—'}</td>
+        <td><b>${fmtINR(r.st.balance)}</b></td>
+        <td>${r.interestBearing ? fmtINR(r.st.interestDue) : '—'}</td>
+        <td>${r.status==='Closed' ? 'Closed' : (r.closeYM ? fmtDate(lastDayOfYM(r.closeYM)) : '—')}</td>
+        <td>${dBadge(r.status)}</td>
+        <td>${r.priority ? `<span class="badge ${r.priority===1?'bad':''}">P${r.priority}${r.priority===1?' · Target':''}</span>` : '—'}</td>
+        <td style="min-width:130px;">${dPbar(r.st.progress)}<span class="tag">${r.st.progress.toFixed(2)}%</span></td>
+      </tr>`).join('')}
+      <tr class="total-row"><td class="name">Total</td><td>${fmtINR(sum(r=>r.st.opening))}</td><td></td><td>${fmtINR(sum(r=>r.minFull))}</td>
+        <td><b>${fmtINR(sum(r=>r.st.balance))}</b></td><td>${fmtINR(sum(r=>r.interestBearing?r.st.interestDue:0))}</td><td></td><td></td><td></td><td></td></tr>
+    </tbody></table></div>`;
+}
+function renderMyDebts(){
+  const page = PAGES.find(p=>p.id==='mydebts');
+  const plans = computePlans(), rows = buildDebtRows(plans);
+  const html = `
+    <div class="page-head">
+      <div>
+        <div class="page-eyebrow">Debt</div>
+        <div class="page-title">My Debts</div>
+        <div class="page-sub">Every figure is calculated automatically. Add or change debts and payments in the Debt Entry tab. Priority and closure dates follow the ${dStratName(plans.activeStrategy)} plan.</div>
+      </div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Interest-Bearing Debts</h3></div>${dDebtTable(rows.filter(r=>r.interestBearing), 'interest-bearing')}</div>
+    <div class="panel"><div class="panel-head"><h3>Interest-Free Debts</h3></div>${dDebtTable(rows.filter(r=>!r.interestBearing), 'interest-free')}</div>
+    <div class="rate-note">Interest Accrued = interest built up since the tracking start date that you haven't logged as paid yet. Monthly Payment for gold loans is the monthly interest; for scheduled loans it is this month's instalment.</div>
+  `;
+  mainEl.innerHTML = pageShell(page, html);
+}
+
+/* ---------------- REPAYMENT STRATEGY ---------------- */
+function renderStrategy(){
+  const page = PAGES.find(p=>p.id==='strategy');
+  const plans = computePlans(), D = getDebt();
+  const sn = plans.snowball, av = plans.avalanche, rec = plans.recommended, act = plans.active;
+  const diff = sn.totalInterest - av.totalInterest;           // > 0: Avalanche cheaper
+  const savedCell = key => {
+    const d = key==='snowball' ? -diff : diff;               // positive = this method saves money
+    return d > 0.5 ? `<span class="up">Saves ${fmtINR(d)}</span>` : d < -0.5 ? `<span class="down">Costs ${fmtINR(-d)} more</span>` : 'Same';
+  };
+  const hl = key => rec.pick===key ? 'style="background:#ffffff08;"' : '';
+  const dateCell = s => s.startTotal<=DEBT_EPS ? 'Debt-free' : (s.debtFree ? fmtDate(s.endDate) : 'Not within 50 years');
+  const monthsCell = s => s.debtFree ? `${s.months} month${s.months===1?'':'s'}` : '—';
+  const budgetSet = !plans.budgetIsAuto;
+  const m0 = act.timeline[0];
+  const ids = Object.keys(act.names);
+  const html = `
+    <div class="page-head">
+      <div>
+        <div class="page-eyebrow">Debt</div>
+        <div class="page-title">Repayment Strategy</div>
+        <div class="page-sub">Debt Snowball (smallest balance first) vs Debt Avalanche (highest interest first), compared on your real debts.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="form-row">
+        <div class="field"><label>Total monthly amount for debts (₹)</label>
+          <input type="number" id="stratBudget" step="any" min="0" value="${budgetSet ? D.settings.monthlyBudget : ''}" placeholder="Auto: ${fmtINR(act.minsAtStart)} (this month's minimums)"></div>
+        <div class="field"><label>Plan to follow</label>
+          <select id="stratPlan">${dOpt('recommended','Recommended ('+(rec.pick==='snowball'?'Snowball':'Avalanche')+')', D.settings.plan==='recommended'||!D.settings.plan)}${dOpt('snowball','Debt Snowball', D.settings.plan==='snowball')}${dOpt('avalanche','Debt Avalanche', D.settings.plan==='avalanche')}</select></div>
+      </div>
+      <div class="rate-note">Leave the amount blank to use the minimums you already owe each month. Add extra here to see how much sooner you'd be debt-free. When a debt is cleared, its payment rolls over to the next target automatically.</div>
+      ${budgetSet && +D.settings.monthlyBudget < act.minsAtStart-DEBT_EPS ? `<div class="rate-note" style="color:var(--amber);">That amount is below this month's required minimums (${fmtINR(act.minsAtStart)}) — the minimums are still assumed to be paid.</div>` : ''}
+    </div>
+
+    <div class="panel" style="border-color:#34D39944;">
+      <div class="panel-head"><h3>Recommended: ${dStratName(rec.pick)}</h3><span class="badge ok">Recommended</span></div>
+      <div style="font-size:13.5px;line-height:1.55;">${rec.reason}</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Comparison</h3></div>
+      <div class="table-scroll"><table>
+        <thead><tr><th></th><th>Debt Snowball${rec.pick==='snowball'?' <span class="badge ok">Recommended</span>':''}</th><th>Debt Avalanche${rec.pick==='avalanche'?' <span class="badge ok">Recommended</span>':''}</th></tr></thead>
+        <tbody>
+          <tr><td class="name">How it works</td><td ${hl('snowball')}>Smallest balance first</td><td ${hl('avalanche')}>Highest interest rate first</td></tr>
+          <tr><td class="name">Debt-free date</td><td ${hl('snowball')}><b>${dateCell(sn)}</b></td><td ${hl('avalanche')}><b>${dateCell(av)}</b></td></tr>
+          <tr><td class="name">Time to debt-free</td><td ${hl('snowball')}>${monthsCell(sn)}</td><td ${hl('avalanche')}>${monthsCell(av)}</td></tr>
+          <tr><td class="name">Total interest you will pay</td><td ${hl('snowball')}>${fmtINR(sn.totalInterest)}</td><td ${hl('avalanche')}>${fmtINR(av.totalInterest)}</td></tr>
+          <tr><td class="name">Interest saved vs the other method</td><td ${hl('snowball')}>${savedCell('snowball')}</td><td ${hl('avalanche')}>${savedCell('avalanche')}</td></tr>
+          <tr><td class="name">Total you will repay</td><td ${hl('snowball')}>${fmtINR(sn.totalPaid)}</td><td ${hl('avalanche')}>${fmtINR(av.totalPaid)}</td></tr>
+        </tbody>
+      </table></div>
+      <div class="rate-note">Both plans use the same monthly amount (${fmtINR(act.baseBudget)}). Interest is estimated monthly and assumed paid as it accrues.</div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Balance over time</h3>
+        <div class="sub">Total still owed, month by month (first 5 years shown)</div>
+        <div class="chart-wrap tall"><canvas id="stratBalChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Total interest</h3>
+        <div class="sub">What each method costs you</div>
+        <div class="chart-wrap tall"><canvas id="stratIntChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      ${[['snowball',sn],['avalanche',av]].map(([k,s])=>`
+        <div class="panel">
+          <div class="panel-head"><h3>${dStratName(k)} — payoff order</h3></div>
+          ${s.closures.length===0 ? '<div class="empty-state"><b>No debts</b></div>' :
+            `<div class="table-scroll"><table><thead><tr><th>#</th><th>Debt</th><th>Cleared in</th></tr></thead><tbody>
+              ${s.closures.map((c,i)=>`<tr><td>${i+1}</td><td class="name">${esc(c.name)}</td><td>${fmtDate(lastDayOfYM(c.ym))}</td></tr>`).join('')}
+            </tbody></table></div>`}
+        </div>`).join('')}
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>This month's payments (${dStratName(plans.activeStrategy)})</h3></div>
+      ${!m0 ? '<div class="empty-state"><b>Nothing to pay</b>You are debt-free.</div>' : `
+      <div class="table-scroll"><table><thead><tr><th>Debt</th><th>Minimum</th><th>Extra</th><th>Total this month</th></tr></thead><tbody>
+        ${ids.filter(id=>m0.pay[id]!==undefined).map(id=>{ const total=m0.pay[id], min=m0.mins[id]||0; return `<tr><td class="name">${esc(act.names[id])}</td><td>${fmtINR(min)}</td><td>${total-min>DEBT_EPS?'<b>'+fmtINR(total-min)+'</b>':'—'}</td><td><b>${fmtINR(total)}</b></td></tr>`; }).join('')}
+        <tr class="total-row"><td class="name">Total</td><td>${fmtINR(ids.reduce((s,id)=>s+(m0.mins[id]||0),0))}</td><td>${fmtINR(ids.reduce((s,id)=>s+Math.max(0,(m0.pay[id]||0)-(m0.mins[id]||0)),0))}</td><td><b>${fmtINR(m0.paid)}</b></td></tr>
+      </tbody></table></div>
+      <div class="rate-note">Already paid something this month? Log it in Debt Entry and these amounts shrink accordingly.</div>`}
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Month-by-month plan (${dStratName(plans.activeStrategy)})</h3></div>
+      ${act.timeline.length===0 ? '<div class="empty-state"><b>No schedule</b></div>' : `
+      <div class="table-scroll" style="max-height:380px;overflow:auto;"><table>
+        <thead><tr><th>Month</th>${ids.map(id=>`<th>${esc(act.names[id])}</th>`).join('')}<th>Total paid</th><th>Interest</th><th>Still owed</th></tr></thead>
+        <tbody>${act.timeline.slice(0,60).map(m=>`<tr><td class="name">${ymLabel(m.ym)}</td>${ids.map(id=>`<td>${(m.pay[id]||0)>DEBT_EPS?fmtINR(m.pay[id]):'—'}</td>`).join('')}<td><b>${fmtINR(m.paid)}</b></td><td>${fmtINR(m.interest)}</td><td>${fmtINR(m.balance)}</td></tr>`).join('')}</tbody>
+      </table></div>`}
+    </div>
+  `;
+  mainEl.innerHTML = pageShell(page, html);
+
+  document.getElementById('stratBudget').addEventListener('change', e=>{
+    const v = parseFloat(e.target.value);
+    D.settings.monthlyBudget = v>0 ? v : null;
+    saveDB(); renderAll();
+  });
+  document.getElementById('stratPlan').addEventListener('change', e=>{ D.settings.plan = e.target.value; saveDB(); renderAll(); });
+
+  destroyChart('stratBal'); destroyChart('stratInt');
+  const N = Math.min(60, Math.max(sn.months, av.months));
+  const series = s => [s.startTotal, ...s.timeline.slice(0,N).map(m=>dR2(m.balance)), ...Array(Math.max(0, N-s.timeline.length)).fill(0)];
+  charts.stratBal = new Chart(document.getElementById('stratBalChart'), {
+    type:'line',
+    data:{ labels:['Now', ...(sn.timeline.length>=av.timeline.length?sn:av).timeline.slice(0,N).map(m=>ymLabel(m.ym))],
+           datasets:[
+             { label:'Debt Snowball',  data:series(sn), borderColor:'#FBBF24', backgroundColor:'#FBBF2422', tension:.25, borderWidth:2.5, pointRadius:0 },
+             { label:'Debt Avalanche', data:series(av), borderColor:'#4C8DFF', backgroundColor:'#4C8DFF22', tension:.25, borderWidth:2.5, pointRadius:0 } ]},
+    options: dLineOpts(fmtINR)
+  });
+  charts.stratInt = new Chart(document.getElementById('stratIntChart'), {
+    type:'bar',
+    data:{ labels:['Debt Snowball','Debt Avalanche'], datasets:[{ label:'Total interest', data:[dR2(sn.totalInterest), dR2(av.totalInterest)], backgroundColor:['#FBBF24','#4C8DFF'], borderRadius:8 }]},
+    options:{ plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>` ${fmtINR(ctx.raw)}`}}},
+              scales:{ x:{grid:{display:false}, ticks:{color:'#8B96AC'}}, y:{grid:{color:'#ffffff0a'}, ticks:{color:'#8B96AC', callback:v=>fmtINR(v)}} } }
+  });
+}
+
+/* ---------------- DEBT ENTRY ---------------- */
+function dParseSchedule(txt){
+  const list = [];
+  if(!txt || !String(txt).trim()) return {ok:true, list};
+  for(const part of String(txt).split(/[,\n;]+/)){
+    const m = part.trim().match(/^(\d{4}-\d{2})\s*[=:]\s*([\d.]+)$/);
+    if(!m) return {ok:false};
+    const mm = +m[1].slice(5);
+    if(mm<1 || mm>12) return {ok:false};
+    list.push({month:m[1], amount:parseFloat(m[2])});
+  }
+  return {ok:true, list};
+}
+function dScheduleText(s){ return (s||[]).map(x=>`${x.month}=${x.amount}`).join(', '); }
+function dFormFields(kind, p){
+  p = p||{};
+  const D = getDebt(), today = todayStr();
+  if(kind==='debt'){
+    return `
+      <div class="form-row">
+        <div class="field"><label>Debt name</label><input required name="name" value="${esc(p.name||'')}" placeholder="e.g. Gold – Muthoot Finance"></div>
+        <div class="field"><label>Category</label><select name="category">${Object.entries(DEBT_CATEGORIES).map(([k,v])=>dOpt(k,v,(p.category||'other')===k)).join('')}</select></div>
+        <div class="field"><label>Opening balance (₹)</label><input required name="openingBalance" type="number" step="any" min="0" value="${p.openingBalance??''}"></div>
+        <div class="field"><label>Already repaid before tracking (₹)</label><input name="priorPaid" type="number" step="any" min="0" value="${p.priorPaid??0}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Interest rate (%)</label><input name="rate" type="number" step="any" min="0" value="${p.rate??0}"></div>
+        <div class="field"><label>Rate is per</label><select name="ratePeriod">${dOpt('year','Year',(p.ratePeriod||'year')==='year')}${dOpt('month','Month',p.ratePeriod==='month')}</select></div>
+        <div class="field"><label>Monthly payment (optional)</label><input name="monthlyPayment" type="number" step="any" min="0" value="${p.monthlyPayment??''}" placeholder="Blank = interest only / none"></div>
+        <div class="field"><label>Tracking start date</label><input required name="startDate" type="date" value="${p.startDate||today}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field" style="grid-column:1/-1;"><label>Fixed repayment schedule (optional) — month=amount, e.g. 2026-10=5500, 2026-11=5500</label>
+          <input name="schedule" value="${esc(dScheduleText(p.schedule))}" placeholder="Leave blank if there is no fixed schedule"></div>
+      </div>`;
+  }
+  if(kind==='payment'){
+    return `
+      <div class="form-row">
+        <div class="field"><label>Debt</label><select required name="debtId">${D.debts.map(d=>dOpt(d.id, esc(d.name), d.id===p.debtId)).join('')}</select></div>
+        <div class="field"><label>Date</label><input required name="date" type="date" value="${p.date||today}"></div>
+        <div class="field"><label>Amount (₹)</label><input required name="amount" type="number" step="any" min="0" value="${p.amount??''}"></div>
+        <div class="field"><label>Goes towards</label><select name="type">${dOpt('principal','Principal (reduces what you owe)',(p.type||'principal')==='principal')}${dOpt('interest','Interest (gold loans etc.)',p.type==='interest')}</select></div>
+      </div>`;
+  }
+  return `
+    <div class="form-row">
+      <div class="field"><label>Asset name</label><input required name="name" value="${esc(p.name||'')}" placeholder="e.g. Pledged gold, Savings account"></div>
+      <div class="field"><label>Value (₹)</label><input required name="value" type="number" step="any" min="0" value="${p.value??''}"></div>
+      <div class="field"><label>As of</label><input required name="date" type="date" value="${p.date||today}"></div>
+    </div>
+    <div class="rate-note">Your investments are already counted automatically from the Investment Dashboard — only add things that aren't tracked there (e.g. the gold you've pledged).</div>`;
+}
+function dEntriesFlat(){
+  const D = getDebt(), out = [];
+  D.debts.forEach(d=>out.push({kind:'debt', id:d.id, cat:'Debt', text:d.name, date:d.startDate||'',
+    detail:`${esc(d.name)} · opening ${fmtINR(d.openingBalance)} · ${(+d.rate||0)>0 ? (d.ratePeriod==='month' ? d.rate+'% / month' : d.rate+'% p.a.') : 'interest-free'}`}));
+  D.payments.forEach(p=>{ const d = D.debts.find(x=>x.id===p.debtId);
+    out.push({kind:'payment', id:p.id, cat:'Payment', text:d?d.name:'', date:p.date,
+      detail:`${esc(d?d.name:'(removed debt)')} · ${fmtINR(p.amount)} ${p.type==='interest'?'interest':'principal'}`}); });
+  D.assets.forEach(a=>out.push({kind:'asset', id:a.id, cat:'Asset', text:a.name, date:a.date||'', detail:`${esc(a.name)} · ${fmtINR(a.value)}`}));
+  D.snapshots.forEach(s=>out.push({kind:'snap', id:s.id, cat:'Net worth snapshot', text:'net worth snapshot', date:s.date, detail:`Net worth ${fmtINR(s.netWorth)}`}));
+  out.sort((a,b)=> (a.date||'')<(b.date||'') ? 1 : (a.date||'')>(b.date||'') ? -1 : 0);
+  return out;
+}
+function dEntriesHtml(filterText){
+  const all = dEntriesFlat(), q = (filterText||'').trim().toLowerCase();
+  const list = q ? all.filter(e=>(e.cat+' '+e.text+' '+e.detail).toLowerCase().includes(q)) : all;
+  return `
+    <div class="panel-head" style="margin-bottom:8px;"><h3 style="font-size:13px;color:var(--ink-dim);font-weight:600;">${list.length}${q?` of ${all.length}`:''} ${list.length===1?'entry':'entries'}</h3></div>
+    ${list.length===0 ? (q ? `<div class="empty-state"><b>No matches</b>Nothing found for "${esc(filterText)}".</div>` : '<div class="empty-state"><b>Nothing yet</b></div>') :
+      `<div class="table-scroll"><table><thead><tr><th>Type</th><th>Detail</th><th>Date</th><th></th></tr></thead><tbody>
+        ${list.map(e=>`<tr><td class="name">${e.cat}</td><td>${e.detail}</td><td>${e.date?fmtDate(e.date):'—'}</td>
+          <td>${e.kind==='snap'?'':`<button class="btn tiny ghost" data-dedit="${e.kind}:${e.id}">Edit</button> `}<button class="btn tiny danger" data-ddel="${e.kind}:${e.id}">Remove</button></td></tr>`).join('')}
+      </tbody></table></div>`}`;
+}
+function dEditPrefill(){
+  const e = window._dEditing; if(!e) return null;
+  const D = getDebt();
+  if(e.kind==='debt') return D.debts.find(x=>x.id===e.id) || null;
+  if(e.kind==='payment') return D.payments.find(x=>x.id===e.id) || null;
+  if(e.kind==='asset') return D.assets.find(x=>x.id===e.id) || null;
+  return null;
+}
+async function dRemove(kind, id){
+  const D = getDebt();
+  const ok = await confirmModal(kind==='debt' ? 'Remove this debt and all of its logged payments? This can\'t be undone.' : 'Remove this entry? This can\'t be undone.');
+  if(!ok) return;
+  if(kind==='debt'){ D.debts = D.debts.filter(d=>d.id!==id); D.payments = D.payments.filter(p=>p.debtId!==id); }
+  else if(kind==='payment') D.payments = D.payments.filter(p=>p.id!==id);
+  else if(kind==='asset') D.assets = D.assets.filter(a=>a.id!==id);
+  else if(kind==='snap') D.snapshots = D.snapshots.filter(s=>s.id!==id);
+  if(window._dEditing && window._dEditing.id===id) window._dEditing = null;
+  saveDB(); renderAll();
+}
+function renderDebtEntry(){
+  const page = PAGES.find(p=>p.id==='debtentry');
+  const kind = window._dKind || 'payment';
+  const editing = window._dEditing || null;
+  const prefill = dEditPrefill();
+  const KINDS = {debt:'Debt', payment:'Payment', asset:'Asset (for net worth)'};
+  const html = `
+    <div class="page-head">
+      <div>
+        <div class="page-eyebrow">Debt</div>
+        <div class="page-title">Debt Entry</div>
+        <div class="page-sub">Add or change debts, log payments and record assets here — the other debt pages update automatically.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${SYNC_ENABLED ? '<button class="btn" id="dPushBtn" type="button">Push to Cloud Now</button>' : ''}
+        <button class="btn ghost" id="dBackupBtn" type="button">Download Full Backup</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="form-row">
+        <div class="field" style="max-width:280px;"><label>What are you adding?</label>
+          <select id="debtKind">${Object.entries(KINDS).map(([k,v])=>dOpt(k,v,k===kind)).join('')}</select></div>
+      </div>
+      ${editing ? '<div class="rate-note" style="color:var(--amber);margin-bottom:10px;">Editing an existing entry — saving will update it in place.</div>' : ''}
+      <form id="debtEntryForm">
+        <div id="debtFieldsWrap">${dFormFields(kind, prefill)}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" type="submit">${editing ? 'Save Changes' : 'Add'}</button>
+          ${editing ? '<button class="btn ghost" type="button" id="dCancelEdit">Cancel</button>' : ''}
+        </div>
+      </form>
+      <div id="debtFeedback" style="display:none;margin-top:12px;padding:10px 12px;border-radius:9px;background:#34D39922;color:var(--green);font-size:12.5px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head" style="margin-bottom:10px;"><h3>All debt entries</h3></div>
+      <div class="form-row" style="margin-bottom:14px;"><div class="field" style="max-width:320px;"><label>Search by name</label>
+        <input type="text" id="debtSearch" placeholder="e.g. Muthoot, Purus, payment..." value="${esc(window._dFilter||'')}"></div></div>
+      <div id="debtEntriesWrap">${dEntriesHtml(window._dFilter||'')}</div>
+    </div>
+  `;
+  mainEl.innerHTML = pageShell(page, html);
+
+  function wireList(){
+    mainEl.querySelectorAll('[data-dedit]').forEach(b=>b.addEventListener('click', ()=>{
+      const [k, id] = b.dataset.dedit.split(':');
+      window._dEditing = {kind:k, id}; window._dKind = k; renderAll();
+    }));
+    mainEl.querySelectorAll('[data-ddel]').forEach(b=>b.addEventListener('click', ()=>{
+      const [k, id] = b.dataset.ddel.split(':');
+      dRemove(k, id);
+    }));
+  }
+  wireList();
+  document.getElementById('debtSearch').addEventListener('input', e=>{
+    window._dFilter = e.target.value;
+    document.getElementById('debtEntriesWrap').innerHTML = dEntriesHtml(window._dFilter);
+    wireList();
+  });
+  document.getElementById('debtKind').addEventListener('change', e=>{
+    window._dKind = e.target.value; window._dEditing = null; renderAll();
+  });
+  const cancel = document.getElementById('dCancelEdit');
+  if(cancel) cancel.addEventListener('click', ()=>{ window._dEditing = null; renderAll(); });
+
+  document.getElementById('dBackupBtn').addEventListener('click', downloadFullBackup);
+  if(SYNC_ENABLED){
+    document.getElementById('dPushBtn').addEventListener('click', async ()=>{
+      const ok = await confirmModal('Push everything on this device to the cloud right now? This will overwrite the cloud copy with whatever is currently showing here.');
+      if(!ok) return;
+      const btn = document.getElementById('dPushBtn');
+      btn.textContent = 'Pushing…'; btn.disabled = true;
+      let result = await forcePushToCloud(false);
+      if(result.conflict){
+        btn.textContent = 'Push to Cloud Now'; btn.disabled = false;
+        const proceed = await confirmModal('The cloud has changes made after this device last synced — likely from another tab or device. Overwriting now will permanently discard those cloud changes. Reload this page first if you want to see them before deciding. Overwrite anyway?');
+        if(!proceed) return;
+        btn.textContent = 'Pushing…'; btn.disabled = true;
+        result = await forcePushToCloud(true);
+      }
+      btn.textContent = 'Push to Cloud Now'; btn.disabled = false;
+      const fb = document.getElementById('debtFeedback');
+      if(fb){
+        fb.style.display = 'block';
+        if(result.ok){ fb.style.background='#34D39922'; fb.style.color='var(--green)'; fb.textContent = 'Pushed to cloud successfully.'; }
+        else { fb.style.background='#F8717122'; fb.style.color='var(--red)'; fb.textContent = 'Push failed: '+(result.reason||'unknown error'); }
+      }
+    });
+  }
+
+  document.getElementById('debtEntryForm').addEventListener('submit', e=>{
+    e.preventDefault();
+    const k = document.getElementById('debtKind').value;
+    const f = new FormData(e.target);
+    const D = getDebt(), edit = window._dEditing;
+    let msg = '';
+    if(k==='debt'){
+      const sch = dParseSchedule(f.get('schedule'));
+      if(!sch.ok){ alert('The schedule should look like 2026-10=5500, 2026-11=5500 (year-month = amount).'); return; }
+      const rec = { name:String(f.get('name')).trim(), category:f.get('category'), openingBalance:+f.get('openingBalance')||0,
+                    priorPaid:+f.get('priorPaid')||0, rate:+f.get('rate')||0, ratePeriod:f.get('ratePeriod'),
+                    monthlyPayment:(+f.get('monthlyPayment')>0) ? +f.get('monthlyPayment') : null, schedule:sch.list, startDate:f.get('startDate') };
+      if(!rec.name){ alert('Please enter a name for the debt.'); return; }
+      if(edit && edit.kind==='debt'){ const d = D.debts.find(x=>x.id===edit.id); if(d) Object.assign(d, rec); msg = `Updated debt: ${rec.name}`; }
+      else { D.debts.push({id:'d_'+uid(), ...rec}); msg = `Added debt: ${rec.name}`; }
+    } else if(k==='payment'){
+      const debt = D.debts.find(x=>x.id===f.get('debtId'));
+      const amount = +f.get('amount');
+      if(!debt){ alert('Please add a debt first.'); return; }
+      if(!(amount>0)){ alert('Please enter an amount above zero.'); return; }
+      if(f.get('type')==='interest' && annualRateOf(debt)<=0){ alert('This debt is interest-free, so a payment towards it can only be principal.'); return; }
+      const rec = { debtId:debt.id, date:f.get('date'), amount, type:f.get('type') };
+      if(edit && edit.kind==='payment'){ const p = D.payments.find(x=>x.id===edit.id); if(p) Object.assign(p, rec); msg = `Updated payment: ${debt.name} · ${fmtINR(amount)}`; }
+      else { D.payments.push({id:uid(), ...rec}); msg = `Added payment: ${debt.name} · ${fmtINR(amount)}`; }
+    } else {
+      const rec = { name:String(f.get('name')).trim(), value:+f.get('value')||0, date:f.get('date') };
+      if(!rec.name){ alert('Please enter a name for the asset.'); return; }
+      if(edit && edit.kind==='asset'){ const a = D.assets.find(x=>x.id===edit.id); if(a) Object.assign(a, rec); msg = `Updated asset: ${rec.name}`; }
+      else { D.assets.push({id:uid(), ...rec}); msg = `Added asset: ${rec.name}`; }
+    }
+    window._dKind = k; window._dEditing = null;
+    saveDB(); renderAll();
+    const fb = document.getElementById('debtFeedback');
+    if(fb){ fb.style.display = 'block'; fb.textContent = msg; }
+  });
+}
+
 /* ================= ROUTER ================= */
 function renderAll(){
   buildSidebar();
@@ -1773,6 +2624,10 @@ function renderAll(){
   else if(currentView==='epf') renderSimpleLedger(5,'epf','EPF','Employees\' Provident Fund');
   else if(currentView==='post') renderPost();
   else if(currentView==='entry') renderEntryPage();
+  else if(currentView==='debtdash') renderDebtDashboard();
+  else if(currentView==='mydebts') renderMyDebts();
+  else if(currentView==='strategy') renderStrategy();
+  else if(currentView==='debtentry') renderDebtEntry();
 }
 renderAll();
 </script>
