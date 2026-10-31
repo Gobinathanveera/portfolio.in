@@ -113,7 +113,7 @@ tr.total-row td{border-top:1px solid var(--border-soft);font-weight:600;}
 .badge.warn{background:#E0A83E22;color:var(--amber);}
 .badge.bad{background:#F8717122;color:var(--red);}
 .badge.dim{background:#ffffff10;color:var(--ink-faint);}
-.view[data-theme="debtdash"],.view[data-theme="mydebts"],.view[data-theme="strategy"],.view[data-theme="debtentry"]{--accent:var(--red);}
+.view[data-theme="debtdash"],.view[data-theme="mydebts"],.view[data-theme="debtentry"]{--accent:var(--red);}
 .sb-foot{padding:14px 18px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;}
 .sidebar.collapsed .sb-foot{opacity:0;}
 
@@ -283,7 +283,6 @@ const PAGES = [
   {id:'entry',     label:'Add Entry', theme:'entry', bg:'https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1600&auto=format&fit=crop', icon:'plus'},
   {id:'debtdash',  group:'debt', label:'DEBT Dashboard',     theme:'debtdash',  bg:'', icon:'card'},
   {id:'mydebts',   group:'debt', label:'My Debts',           theme:'mydebts',   bg:'', icon:'list'},
-  {id:'strategy',  group:'debt', label:'Repayment Strategy', theme:'strategy',  bg:'', icon:'compare'},
   {id:'debtentry', group:'debt', label:'Debt Entry',         theme:'debtentry', bg:'', icon:'plus'},
 ];
 
@@ -297,7 +296,6 @@ const ICONS = {
   mail:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   card:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M7 15h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   list:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 6h13M8 12h13M8 18h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="6" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="18" r="1.2" fill="currentColor"/></svg>',
-  compare:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 4v16M17 4v16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 8l4-4 4 4M13 16l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   plus:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 };
 
@@ -2107,7 +2105,7 @@ function renderDebtDashboard(){
   const today = todayStr();
   const isFree = t.total <= DEBT_EPS;
   const endDate = isFree ? today : (act.debtFree ? act.endDate : null);
-  let cdMain = 'Not reachable', cdSub = 'Raise the monthly amount on the Repayment Strategy tab';
+  let cdMain = 'Not reachable', cdSub = 'Not debt-free within 50 years at the current monthly amount';
   if(endDate){
     const df = diffMD(today, endDate);
     cdMain = isFree ? 'Debt-free' : `${df.months} mo ${df.days} d`;
@@ -2226,7 +2224,7 @@ function dDebtTable(rowsSubset, label){
   if(!rowsSubset.length) return `<div class="empty-state"><b>No ${label} debts</b>Add one in the Debt Entry tab.</div>`;
   const sum = f => rowsSubset.reduce((s,r)=>s+f(r),0);
   return `<div class="table-scroll"><table>
-    <thead><tr><th>Debt Name</th><th>Opening Balance</th><th>Interest Rate</th><th>Monthly Payment</th><th>Current Balance</th><th>Interest Accrued</th><th>Target Closure</th><th>Status</th><th>Priority</th><th>Progress</th></tr></thead>
+    <thead><tr><th>Debt Name</th><th>Opening Balance</th><th>Interest Rate</th><th>Monthly Payment</th><th>Current Balance</th><th>Interest Paid</th><th>Target Closure</th><th>Status</th><th>Priority</th><th>Progress</th></tr></thead>
     <tbody>
       ${rowsSubset.map(r=>`<tr>
         <td class="name"><span class="dot-c" style="background:${r.color}"></span>${esc(r.d.name)}<br><span class="tag">${DEBT_CATEGORIES[r.d.category]||'Other'}</span></td>
@@ -2234,14 +2232,14 @@ function dDebtTable(rowsSubset, label){
         <td>${dRateText(r.d)}</td>
         <td>${r.minFull>DEBT_EPS ? fmtINR(r.minFull) : '—'}</td>
         <td><b>${fmtINR(r.st.balance)}</b></td>
-        <td>${r.interestBearing ? fmtINR(r.st.interestDue) : '—'}</td>
+        <td>${r.interestBearing ? fmtINR(r.st.interestPaid) : '—'}</td>
         <td>${r.status==='Closed' ? 'Closed' : (r.closeYM ? fmtDate(lastDayOfYM(r.closeYM)) : '—')}</td>
         <td>${dBadge(r.status)}</td>
         <td>${r.priority ? `<span class="badge ${r.priority===1?'bad':''}">P${r.priority}${r.priority===1?' · Target':''}</span>` : '—'}</td>
         <td style="min-width:130px;">${dPbar(r.st.progress)}<span class="tag">${r.st.progress.toFixed(2)}%</span></td>
       </tr>`).join('')}
       <tr class="total-row"><td class="name">Total</td><td>${fmtINR(sum(r=>r.st.opening))}</td><td></td><td>${fmtINR(sum(r=>r.minFull))}</td>
-        <td><b>${fmtINR(sum(r=>r.st.balance))}</b></td><td>${fmtINR(sum(r=>r.interestBearing?r.st.interestDue:0))}</td><td></td><td></td><td></td><td></td></tr>
+        <td><b>${fmtINR(sum(r=>r.st.balance))}</b></td><td>${fmtINR(sum(r=>r.st.interestPaid))}</td><td></td><td></td><td></td><td></td></tr>
     </tbody></table></div>`;
 }
 function renderMyDebts(){
@@ -2257,137 +2255,9 @@ function renderMyDebts(){
     </div>
     <div class="panel"><div class="panel-head"><h3>Interest-Bearing Debts</h3></div>${dDebtTable(rows.filter(r=>r.interestBearing), 'interest-bearing')}</div>
     <div class="panel"><div class="panel-head"><h3>Interest-Free Debts</h3></div>${dDebtTable(rows.filter(r=>!r.interestBearing), 'interest-free')}</div>
-    <div class="rate-note">Interest Accrued = interest built up since the tracking start date that you haven't logged as paid yet. Monthly Payment for gold loans is the monthly interest; for scheduled loans it is this month's instalment.</div>
+    <div class="rate-note">Interest Paid = the total interest you've logged as paid on that debt (payments marked "Interest" in the Debt Entry tab). Monthly Payment for gold loans is the monthly interest; for scheduled loans it is this month's instalment.</div>
   `;
   mainEl.innerHTML = pageShell(page, html);
-}
-
-/* ---------------- REPAYMENT STRATEGY ---------------- */
-function renderStrategy(){
-  const page = PAGES.find(p=>p.id==='strategy');
-  const plans = computePlans(), D = getDebt();
-  const sn = plans.snowball, av = plans.avalanche, rec = plans.recommended, act = plans.active;
-  const diff = sn.totalInterest - av.totalInterest;           // > 0: Avalanche cheaper
-  const savedCell = key => {
-    const d = key==='snowball' ? -diff : diff;               // positive = this method saves money
-    return d > 0.5 ? `<span class="up">Saves ${fmtINR(d)}</span>` : d < -0.5 ? `<span class="down">Costs ${fmtINR(-d)} more</span>` : 'Same';
-  };
-  const hl = key => rec.pick===key ? 'style="background:#ffffff08;"' : '';
-  const dateCell = s => s.startTotal<=DEBT_EPS ? 'Debt-free' : (s.debtFree ? fmtDate(s.endDate) : 'Not within 50 years');
-  const monthsCell = s => s.debtFree ? `${s.months} month${s.months===1?'':'s'}` : '—';
-  const budgetSet = !plans.budgetIsAuto;
-  const m0 = act.timeline[0];
-  const ids = Object.keys(act.names);
-  const html = `
-    <div class="page-head">
-      <div>
-        <div class="page-eyebrow">Debt</div>
-        <div class="page-title">Repayment Strategy</div>
-        <div class="page-sub">Debt Snowball (smallest balance first) vs Debt Avalanche (highest interest first), compared on your real debts.</div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="form-row">
-        <div class="field"><label>Total monthly amount for debts (₹)</label>
-          <input type="number" id="stratBudget" step="any" min="0" value="${budgetSet ? D.settings.monthlyBudget : ''}" placeholder="Auto: ${fmtINR(act.minsAtStart)} (this month's minimums)"></div>
-        <div class="field"><label>Plan to follow</label>
-          <select id="stratPlan">${dOpt('recommended','Recommended ('+(rec.pick==='snowball'?'Snowball':'Avalanche')+')', D.settings.plan==='recommended'||!D.settings.plan)}${dOpt('snowball','Debt Snowball', D.settings.plan==='snowball')}${dOpt('avalanche','Debt Avalanche', D.settings.plan==='avalanche')}</select></div>
-      </div>
-      <div class="rate-note">Leave the amount blank to use the minimums you already owe each month. Add extra here to see how much sooner you'd be debt-free. When a debt is cleared, its payment rolls over to the next target automatically.</div>
-      ${budgetSet && +D.settings.monthlyBudget < act.minsAtStart-DEBT_EPS ? `<div class="rate-note" style="color:var(--amber);">That amount is below this month's required minimums (${fmtINR(act.minsAtStart)}) — the minimums are still assumed to be paid.</div>` : ''}
-    </div>
-
-    <div class="panel" style="border-color:#34D39944;">
-      <div class="panel-head"><h3>Recommended: ${dStratName(rec.pick)}</h3><span class="badge ok">Recommended</span></div>
-      <div style="font-size:13.5px;line-height:1.55;">${rec.reason}</div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>Comparison</h3></div>
-      <div class="table-scroll"><table>
-        <thead><tr><th></th><th>Debt Snowball${rec.pick==='snowball'?' <span class="badge ok">Recommended</span>':''}</th><th>Debt Avalanche${rec.pick==='avalanche'?' <span class="badge ok">Recommended</span>':''}</th></tr></thead>
-        <tbody>
-          <tr><td class="name">How it works</td><td ${hl('snowball')}>Smallest balance first</td><td ${hl('avalanche')}>Highest interest rate first</td></tr>
-          <tr><td class="name">Debt-free date</td><td ${hl('snowball')}><b>${dateCell(sn)}</b></td><td ${hl('avalanche')}><b>${dateCell(av)}</b></td></tr>
-          <tr><td class="name">Time to debt-free</td><td ${hl('snowball')}>${monthsCell(sn)}</td><td ${hl('avalanche')}>${monthsCell(av)}</td></tr>
-          <tr><td class="name">Total interest you will pay</td><td ${hl('snowball')}>${fmtINR(sn.totalInterest)}</td><td ${hl('avalanche')}>${fmtINR(av.totalInterest)}</td></tr>
-          <tr><td class="name">Interest saved vs the other method</td><td ${hl('snowball')}>${savedCell('snowball')}</td><td ${hl('avalanche')}>${savedCell('avalanche')}</td></tr>
-          <tr><td class="name">Total you will repay</td><td ${hl('snowball')}>${fmtINR(sn.totalPaid)}</td><td ${hl('avalanche')}>${fmtINR(av.totalPaid)}</td></tr>
-        </tbody>
-      </table></div>
-      <div class="rate-note">Both plans use the same monthly amount (${fmtINR(act.baseBudget)}). Interest is estimated monthly and assumed paid as it accrues.</div>
-    </div>
-
-    <div class="chart-grid">
-      <div class="chart-card">
-        <h3>Balance over time</h3>
-        <div class="sub">Total still owed, month by month (first 5 years shown)</div>
-        <div class="chart-wrap tall"><canvas id="stratBalChart"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h3>Total interest</h3>
-        <div class="sub">What each method costs you</div>
-        <div class="chart-wrap tall"><canvas id="stratIntChart"></canvas></div>
-      </div>
-    </div>
-
-    <div class="two-col">
-      ${[['snowball',sn],['avalanche',av]].map(([k,s])=>`
-        <div class="panel">
-          <div class="panel-head"><h3>${dStratName(k)} — payoff order</h3></div>
-          ${s.closures.length===0 ? '<div class="empty-state"><b>No debts</b></div>' :
-            `<div class="table-scroll"><table><thead><tr><th>#</th><th>Debt</th><th>Cleared in</th></tr></thead><tbody>
-              ${s.closures.map((c,i)=>`<tr><td>${i+1}</td><td class="name">${esc(c.name)}</td><td>${fmtDate(lastDayOfYM(c.ym))}</td></tr>`).join('')}
-            </tbody></table></div>`}
-        </div>`).join('')}
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>This month's payments (${dStratName(plans.activeStrategy)})</h3></div>
-      ${!m0 ? '<div class="empty-state"><b>Nothing to pay</b>You are debt-free.</div>' : `
-      <div class="table-scroll"><table><thead><tr><th>Debt</th><th>Minimum</th><th>Extra</th><th>Total this month</th></tr></thead><tbody>
-        ${ids.filter(id=>m0.pay[id]!==undefined).map(id=>{ const total=m0.pay[id], min=m0.mins[id]||0; return `<tr><td class="name">${esc(act.names[id])}</td><td>${fmtINR(min)}</td><td>${total-min>DEBT_EPS?'<b>'+fmtINR(total-min)+'</b>':'—'}</td><td><b>${fmtINR(total)}</b></td></tr>`; }).join('')}
-        <tr class="total-row"><td class="name">Total</td><td>${fmtINR(ids.reduce((s,id)=>s+(m0.mins[id]||0),0))}</td><td>${fmtINR(ids.reduce((s,id)=>s+Math.max(0,(m0.pay[id]||0)-(m0.mins[id]||0)),0))}</td><td><b>${fmtINR(m0.paid)}</b></td></tr>
-      </tbody></table></div>
-      <div class="rate-note">Already paid something this month? Log it in Debt Entry and these amounts shrink accordingly.</div>`}
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>Month-by-month plan (${dStratName(plans.activeStrategy)})</h3></div>
-      ${act.timeline.length===0 ? '<div class="empty-state"><b>No schedule</b></div>' : `
-      <div class="table-scroll" style="max-height:380px;overflow:auto;"><table>
-        <thead><tr><th>Month</th>${ids.map(id=>`<th>${esc(act.names[id])}</th>`).join('')}<th>Total paid</th><th>Interest</th><th>Still owed</th></tr></thead>
-        <tbody>${act.timeline.slice(0,60).map(m=>`<tr><td class="name">${ymLabel(m.ym)}</td>${ids.map(id=>`<td>${(m.pay[id]||0)>DEBT_EPS?fmtINR(m.pay[id]):'—'}</td>`).join('')}<td><b>${fmtINR(m.paid)}</b></td><td>${fmtINR(m.interest)}</td><td>${fmtINR(m.balance)}</td></tr>`).join('')}</tbody>
-      </table></div>`}
-    </div>
-  `;
-  mainEl.innerHTML = pageShell(page, html);
-
-  document.getElementById('stratBudget').addEventListener('change', e=>{
-    const v = parseFloat(e.target.value);
-    D.settings.monthlyBudget = v>0 ? v : null;
-    saveDB(); renderAll();
-  });
-  document.getElementById('stratPlan').addEventListener('change', e=>{ D.settings.plan = e.target.value; saveDB(); renderAll(); });
-
-  destroyChart('stratBal'); destroyChart('stratInt');
-  const N = Math.min(60, Math.max(sn.months, av.months));
-  const series = s => [s.startTotal, ...s.timeline.slice(0,N).map(m=>dR2(m.balance)), ...Array(Math.max(0, N-s.timeline.length)).fill(0)];
-  charts.stratBal = new Chart(document.getElementById('stratBalChart'), {
-    type:'line',
-    data:{ labels:['Now', ...(sn.timeline.length>=av.timeline.length?sn:av).timeline.slice(0,N).map(m=>ymLabel(m.ym))],
-           datasets:[
-             { label:'Debt Snowball',  data:series(sn), borderColor:'#FBBF24', backgroundColor:'#FBBF2422', tension:.25, borderWidth:2.5, pointRadius:0 },
-             { label:'Debt Avalanche', data:series(av), borderColor:'#4C8DFF', backgroundColor:'#4C8DFF22', tension:.25, borderWidth:2.5, pointRadius:0 } ]},
-    options: dLineOpts(fmtINR)
-  });
-  charts.stratInt = new Chart(document.getElementById('stratIntChart'), {
-    type:'bar',
-    data:{ labels:['Debt Snowball','Debt Avalanche'], datasets:[{ label:'Total interest', data:[dR2(sn.totalInterest), dR2(av.totalInterest)], backgroundColor:['#FBBF24','#4C8DFF'], borderRadius:8 }]},
-    options:{ plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>` ${fmtINR(ctx.raw)}`}}},
-              scales:{ x:{grid:{display:false}, ticks:{color:'#8B96AC'}}, y:{grid:{color:'#ffffff0a'}, ticks:{color:'#8B96AC', callback:v=>fmtINR(v)}} } }
-  });
 }
 
 /* ---------------- DEBT ENTRY ---------------- */
@@ -2626,7 +2496,6 @@ function renderAll(){
   else if(currentView==='entry') renderEntryPage();
   else if(currentView==='debtdash') renderDebtDashboard();
   else if(currentView==='mydebts') renderMyDebts();
-  else if(currentView==='strategy') renderStrategy();
   else if(currentView==='debtentry') renderDebtEntry();
 }
 renderAll();
